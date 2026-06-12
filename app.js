@@ -111,28 +111,28 @@
     saveState(false);
   }
 
-  function migrateLucioAthlete() {
-    const oldAthlete = state.athletes.find((athlete) => athlete.id === "miquel");
-    const lucioAthlete = state.athletes.find((athlete) => athlete.id === "lucio");
+  function migrateLucioAthlete(target = state) {
+    const oldAthlete = target.athletes.find((athlete) => athlete.id === "miquel");
+    const lucioAthlete = target.athletes.find((athlete) => athlete.id === "lucio");
 
     if (oldAthlete && lucioAthlete && oldAthlete !== lucioAthlete) {
-      state.sessions.forEach((session) => {
+      target.sessions.forEach((session) => {
         if (session.athleteId === "miquel") session.athleteId = "lucio";
       });
-      state.athletes = state.athletes.filter((athlete) => athlete.id !== "miquel");
+      target.athletes = target.athletes.filter((athlete) => athlete.id !== "miquel");
       return;
     }
 
     if (oldAthlete) {
       oldAthlete.id = "lucio";
       oldAthlete.name = "Lucio";
-      state.sessions.forEach((session) => {
+      target.sessions.forEach((session) => {
         if (session.athleteId === "miquel") session.athleteId = "lucio";
       });
-      if (state.preferences.chartAthlete === "miquel") state.preferences.chartAthlete = "lucio";
+      if (target.preferences.chartAthlete === "miquel") target.preferences.chartAthlete = "lucio";
     }
 
-    state.athletes.forEach((athlete) => {
+    target.athletes.forEach((athlete) => {
       if (athlete.name === "Miquel") athlete.name = "Lucio";
     });
   }
@@ -843,6 +843,10 @@
     const next = clone(incoming);
     next.preferences = { ...(state.preferences || {}), ...(next.preferences || {}) };
     next.updatedAt = next.updatedAt || new Date().toISOString();
+    next.athletes = Array.isArray(next.athletes) ? next.athletes : [];
+    next.sessions = Array.isArray(next.sessions) ? next.sessions : [];
+    next.preferences = next.preferences || {};
+    migrateLucioAthlete(next);
     return next;
   }
 
