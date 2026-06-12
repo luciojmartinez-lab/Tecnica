@@ -2,7 +2,7 @@
   "use strict";
 
   const STORAGE_KEY = "tecnica-state-v1";
-  const APP_VERSION = "001v2";
+  const APP_VERSION = "001v3";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -55,7 +55,7 @@
     return counts.map((count) => ({
       id: kind === "pasos" ? `p${count}` : `z${count}`,
       label: `${count} ${kind}`,
-      short: `${count}`,
+      short: `${count}${kind === "pasos" ? "p" : "z"}`,
     }));
   }
 
@@ -174,8 +174,9 @@
     });
 
     $("#recordsBody").addEventListener("click", (event) => {
-      const button = event.target.closest("[data-delete-attempt], [data-delete-distance]");
+      const button = event.target.closest("[data-delete-session], [data-delete-attempt], [data-delete-distance]");
       if (!button) return;
+      if (button.dataset.deleteSession) deleteSession(button.dataset.deleteSession);
       if (button.dataset.deleteAttempt) deleteAttempt(button.dataset.deleteAttempt);
       if (button.dataset.deleteDistance) deleteDistance(button.dataset.deleteDistance, button.dataset.approach);
     });
@@ -208,7 +209,11 @@
     });
 
     ["sortSelect", "filterDiscipline", "filterAthlete", "filterText"].forEach((id) => {
-      $("#" + id).addEventListener("input", renderRecords);
+      $("#" + id).addEventListener("input", () => {
+        state.preferences[id] = $("#" + id).value;
+        saveState(false);
+        renderRecords();
+      });
     });
 
     $("#chartAthlete").addEventListener("change", () => {
@@ -259,6 +264,12 @@
   }
 
   function renderSelects() {
+    const previousFilters = {
+      sortSelect: $("#sortSelect")?.value || state.preferences.sortSelect || "desc",
+      filterDiscipline: $("#filterDiscipline")?.value || state.preferences.filterDiscipline || "tests",
+      filterAthlete: $("#filterAthlete")?.value || state.preferences.filterAthlete || "",
+      filterText: $("#filterText")?.value || state.preferences.filterText || "",
+    };
     const athleteOptions = state.athletes
       .filter((athlete) => athlete.active !== false)
       .map((athlete) => `<option value="${esc(athlete.id)}">${esc(athlete.name)}</option>`)
@@ -276,6 +287,10 @@
 
     if (state.preferences.chartAthlete) $("#chartAthlete").value = state.preferences.chartAthlete;
     $("#chartDiscipline").value = state.preferences.chartDiscipline || "tests";
+    $("#sortSelect").value = previousFilters.sortSelect;
+    $("#filterDiscipline").value = previousFilters.filterDiscipline;
+    $("#filterAthlete").value = previousFilters.filterAthlete;
+    $("#filterText").value = previousFilters.filterText;
   }
 
   function renderKpis() {
@@ -303,7 +318,7 @@
     const discipline = DISCIPLINES[$("#disciplineSelect").value] || DISCIPLINES.tests;
     const root = $("#attemptEditor");
     if (discipline.mode === "tests") {
-      root.innerHTML = `<div class="attempt-grid">${discipline.metrics.map(renderTestCard).join("")}</div>`;
+      root.innerHTML = `<div class="attempt-grid tests-grid">${discipline.metrics.map(renderTestCard).join("")}</div>`;
       $$(".attempt-card", root).forEach((card) => {
         card.querySelector("[data-add-test]").addEventListener("click", () => addTestAttempt(card.dataset.metric));
       });
@@ -483,9 +498,15 @@
   }
 
   function renderRecords() {
+    const table = $(".data-table");
+    const head = $(".data-table thead");
     const body = $("#recordsBody");
-    const rows = flattenRows();
     const disciplineFilter = $("#filterDiscipline").value;
+    if (disciplineFilter && DISCIPLINES[disciplineFilter]) {
+      renderDisciplineRecords(table, head, body, disciplineFilter);
+      return;
+    }
+    const rows = flattenRows();
     const athleteFilter = $("#filterAthlete").value;
     const text = normalize($("#filterText").value);
     const best = bestByDay();
@@ -498,9 +519,35 @@
         return order * (a.date.localeCompare(b.date) || a.metricLabel.localeCompare(b.metricLabel));
       });
     if (!sorted.length) {
+      table.className = "data-table generic-table";
+      head.innerHTML = `
+        <tr>
+          <th>Fecha</th>
+          <th>Atleta</th>
+          <th>Especialidad</th>
+          <th>Columna</th>
+          <th>Marca</th>
+          <th>Pies</th>
+          <th>Cent.</th>
+          <th></th>
+        </tr>
+      `;
       body.innerHTML = `<tr><td colspan="8" class="muted">Sin datos</td></tr>`;
       return;
     }
+    table.className = "data-table generic-table";
+    head.innerHTML = `
+      <tr>
+        <th>Fecha</th>
+        <th>Atleta</th>
+        <th>Especialidad</th>
+        <th>Columna</th>
+        <th>Marca</th>
+        <th>Pies</th>
+        <th>Cent.</th>
+        <th></th>
+      </tr>
+    `;
     body.innerHTML = sorted
       .map((row) => {
         const bestKey = keyForBest(row);
@@ -517,11 +564,95 @@
             <td>${row.mark == null ? '<span class="muted">-</span>' : `${fmt(row.mark)} ${row.unit}${isBest ? '<span class="best-badge">Mejor</span>' : ''}`}</td>
             <td>${row.distanceFeet == null ? "" : fmt(row.distanceFeet)}</td>
             <td>${row.distanceCm == null ? "" : fmt(row.distanceCm)}</td>
-            <td><button class="small-button" type="button" ${deleteAttr}>Eliminar</button></td>
+            <td><button class="small-button delete-button" type="button" ${deleteAttr}>-</button></td>
           </tr>
         `;
       })
       .join("");
+  }
+
+  function renderDisciplineRecords(table, head, body, disciplineId) {
+    const discipline = DISCIPLINES[disciplineId];
+    const athleteFilter = $("#filterAthlete").value;
+    const text = normalize($("#filterText").value);
+    const groups = groupedSessions(disciplineId)
+      .filter((row) => !athleteFilter || row.athleteId === athleteFilter)
+      .filter((row) => !text || normalize(Object.values(row.search).join(" ")).includes(text))
+      .sort((a, b) => {
+        const order = $("#sortSelect").value === "asc" ? 1 : -1;
+        return order * (a.date.localeCompare(b.date) || a.athleteName.localeCompare(b.athleteName));
+      });
+
+    const columns = recordColumns(discipline);
+    table.className = `data-table compact-record-table ${discipline.id}-record-table`;
+    head.innerHTML = `
+      <tr>
+        <th>Fecha</th>
+        ${columns.map((column) => `<th>${esc(column.short)}</th>`).join("")}
+        <th></th>
+      </tr>
+    `;
+
+    if (!groups.length) {
+      body.innerHTML = `<tr><td colspan="${columns.length + 2}" class="muted">Sin datos</td></tr>`;
+      return;
+    }
+
+    body.innerHTML = groups
+      .map((row) => `
+        <tr>
+          <td>${formatDate(row.date)}</td>
+          ${columns.map((column) => `<td>${formatRecordCell(row.values[column.key])}</td>`).join("")}
+          <td><button class="small-button delete-button" type="button" data-delete-session="${row.sessionId}" aria-label="Eliminar jornada">-</button></td>
+        </tr>
+      `)
+      .join("");
+  }
+
+  function recordColumns(discipline) {
+    if (discipline.mode === "tests") {
+      return discipline.metrics.map((metric) => ({
+        key: metric.id,
+        short: metric.label === "Pies juntos" ? "Pies juntos" : metric.label,
+      }));
+    }
+    return discipline.approaches.map((approach) => ({
+      key: `${discipline.id}:${approach.id}`,
+      short: approach.short,
+    }));
+  }
+
+  function groupedSessions(disciplineId) {
+    return state.sessions
+      .filter((session) => session.discipline === disciplineId)
+      .map((session) => {
+        const athlete = state.athletes.find((item) => item.id === session.athleteId);
+        const values = {};
+        session.attempts.forEach((attempt) => {
+          const key = attempt.approachId ? `${session.discipline}:${attempt.approachId}` : attempt.eventId;
+          values[key] = values[key] || { mark: null, unit: attempt.unit || "m", attempts: 0 };
+          values[key].attempts += 1;
+          if (values[key].mark == null || attempt.mark > values[key].mark) values[key].mark = attempt.mark;
+        });
+        return {
+          sessionId: session.id,
+          date: session.date,
+          athleteId: session.athleteId,
+          athleteName: athlete ? athlete.name : session.athleteId,
+          values,
+          search: {
+            date: session.date,
+            athlete: athlete ? athlete.name : session.athleteId,
+            notes: session.notes || "",
+            values: Object.values(values).map((value) => value.mark).join(" "),
+          },
+        };
+      });
+  }
+
+  function formatRecordCell(value) {
+    if (!value || value.mark == null) return "";
+    return `${fmt(value.mark)}${value.attempts > 1 ? `<span class="attempt-count">${value.attempts}</span>` : ""}`;
   }
 
   function flattenAttempts() {
@@ -605,6 +736,13 @@
       session.attempts = session.attempts.filter((attempt) => attempt.id !== attemptId);
     });
     state.sessions = state.sessions.filter((session) => session.attempts.length || Object.keys(session.approachDistances || {}).length);
+    saveState();
+    renderAll();
+  }
+
+  function deleteSession(sessionId) {
+    if (!confirm("Eliminar jornada completa?")) return;
+    state.sessions = state.sessions.filter((session) => session.id !== sessionId);
     saveState();
     renderAll();
   }

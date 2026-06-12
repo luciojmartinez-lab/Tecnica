@@ -401,6 +401,11 @@ label select {
   border-collapse: collapse;
 }
 
+.compact-record-table {
+  min-width: 0;
+  table-layout: fixed;
+}
+
 .data-table th {
   position: sticky;
   top: 0;
@@ -418,6 +423,38 @@ label select {
   border-bottom: 1px solid var(--line);
   border-right: 1px solid var(--line);
   vertical-align: top;
+}
+
+.compact-record-table th,
+.compact-record-table td {
+  text-align: center;
+}
+
+.compact-record-table th:first-child,
+.compact-record-table td:first-child {
+  text-align: left;
+}
+
+.delete-button {
+  min-width: 34px;
+  padding-inline: 8px;
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+.attempt-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  margin-left: 3px;
+  border-radius: 50%;
+  background: #e4edf8;
+  color: #295f9d;
+  font-size: 0.68rem;
+  font-weight: 800;
+  vertical-align: middle;
 }
 
 .data-table tr:nth-child(even) td {
@@ -637,21 +674,244 @@ label select {
     padding: 14px 12px 32px;
   }
 
-  .panel,
-  .kpi-card {
+  .panel {
     padding: 14px;
   }
 
-  .kpi-grid,
+  .kpi-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+
+  .kpi-card {
+    min-height: 76px;
+    padding: 8px 6px;
+  }
+
+  .kpi-label {
+    font-size: 0.56rem;
+    line-height: 1.1;
+  }
+
+  .kpi-value {
+    margin-top: 7px;
+    font-size: clamp(1.15rem, 7vw, 1.7rem);
+  }
+
+  .kpi-foot {
+    margin-top: 3px;
+    font-size: 0.58rem;
+    line-height: 1.15;
+  }
+
+  .session-form .form-grid {
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 7px;
+  }
+
+  .session-form .form-grid label {
+    gap: 4px;
+    font-size: 0.68rem;
+  }
+
+  .session-form .form-grid input,
+  .session-form .form-grid select {
+    min-width: 0;
+    min-height: 38px;
+    padding: 6px 7px;
+    font-size: 0.82rem;
+  }
+
+  .session-form .form-grid label:nth-child(4) {
+    grid-column: 1 / -1;
+  }
+
+  .session-form .form-grid label:nth-child(4) input {
+    font-size: 1rem;
+  }
+
+  .tests-grid,
+  .approach-grid {
+    grid-template-columns: 1fr;
+    gap: 0;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--soft);
+  }
+
+  .attempt-grid.approach-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tests-grid .attempt-card,
+  .approach-grid .attempt-card {
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .tests-grid .attempt-card:last-child,
+  .approach-grid .attempt-card:last-child {
+    border-bottom: 0;
+  }
+
+  .tests-grid .attempt-card {
+    grid-template-columns: minmax(78px, 0.9fr) minmax(0, 1fr) minmax(70px, auto);
+    align-items: center;
+    gap: 7px;
+    padding: 8px 0;
+  }
+
+  .tests-grid .attempt-card h3,
+  .approach-grid .attempt-card h3 {
+    font-size: 0.86rem;
+    line-height: 1.15;
+  }
+
+  .tests-grid .attempt-card input,
+  .tests-grid .attempt-card button,
+  .approach-grid .attempt-card input,
+  .approach-grid .attempt-card button {
+    min-height: 34px;
+    padding: 5px 7px;
+    font-size: 0.82rem;
+  }
+
+  .tests-grid .attempt-list,
+  .approach-grid .attempt-list {
+    grid-column: 1 / -1;
+    min-height: 18px;
+  }
+
+  .approach-grid .attempt-card {
+    grid-template-columns: minmax(34px, 0.55fr) minmax(94px, 1.45fr) minmax(54px, 0.85fr) 34px;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 0;
+  }
+
+  .approach-grid .attempt-card .mini-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  .approach-grid .attempt-card .small-button {
+    width: 34px;
+    min-width: 34px;
+    padding: 0;
+    overflow: hidden;
+    color: transparent;
+    position: relative;
+  }
+
+  .approach-grid .attempt-card .small-button::after {
+    content: "+";
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: var(--ink);
+    font-size: 1.2rem;
+  }
+
   .form-grid,
-  .attempt-grid,
-  .attempt-grid.approach-grid,
   .sync-grid {
     grid-template-columns: 1fr;
   }
 
+  .data-panel .panel-title-row {
+    gap: 10px;
+  }
+
+  .toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+    width: 100%;
+  }
+
+  #sortSelect {
+    order: 1;
+  }
+
+  #filterText {
+    order: 2;
+  }
+
+  #filterDiscipline {
+    order: 3;
+  }
+
+  #filterAthlete {
+    order: 4;
+  }
+
+  .toolbar input,
+  .toolbar select {
+    min-width: 0;
+    width: 100%;
+    min-height: 38px;
+    padding: 6px 8px;
+    font-size: 0.84rem;
+  }
+
   .toolbar input {
-    min-width: 100%;
+    min-width: 0;
+  }
+
+  .table-wrap {
+    border-radius: 6px;
+  }
+
+  .data-table {
+    min-width: 0;
+  }
+
+  .data-table th,
+  .data-table td {
+    padding: 8px 5px;
+    font-size: 0.76rem;
+  }
+
+  .compact-record-table th {
+    font-size: 0.68rem;
+  }
+
+  .compact-record-table td {
+    font-size: 0.78rem;
+    white-space: nowrap;
+  }
+
+  .tests-record-table th:first-child,
+  .tests-record-table td:first-child {
+    width: 24%;
+  }
+
+  .tests-record-table th:last-child,
+  .tests-record-table td:last-child,
+  .triple-record-table th:last-child,
+  .triple-record-table td:last-child,
+  .longitud-record-table th:last-child,
+  .longitud-record-table td:last-child,
+  .altura-record-table th:last-child,
+  .altura-record-table td:last-child {
+    width: 34px;
+  }
+
+  .delete-button {
+    min-width: 26px;
+    min-height: 28px;
+    padding: 0;
+  }
+
+  .attempt-count {
+    min-width: 14px;
+    height: 14px;
+    font-size: 0.58rem;
   }
 
   .chart-box {
