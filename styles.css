@@ -698,6 +698,12 @@ label select {
   .kpi-value {
     margin-top: 7px;
     font-size: clamp(1.15rem, 7vw, 1.7rem);
+    overflow-wrap: anywhere;
+  }
+
+  .kpi-card:nth-child(4) .kpi-value {
+    font-size: clamp(0.78rem, 3.8vw, 1rem);
+    line-height: 1.12;
   }
 
   .kpi-foot {
@@ -883,7 +889,7 @@ label select {
   }
 
   .tests-record-table th {
-    font-size: 0.6rem;
+    font-size: 0.56rem;
   }
 
   .compact-record-table td {
