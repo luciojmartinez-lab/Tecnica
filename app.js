@@ -2,7 +2,7 @@
   "use strict";
 
   const STORAGE_KEY = "tecnica-state-v1";
-  const APP_VERSION = "001v5";
+  const APP_VERSION = "001v6";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -347,7 +347,7 @@
     const draftDistance = draft.distances[approach.id] || latest || {};
     return `
       <article class="attempt-card" data-approach="${approach.id}">
-        <h3>${approach.label}</h3>
+        <h3 title="${esc(approach.label)}">${esc(approach.short)}</h3>
         <div class="mini-grid">
           <input type="number" inputmode="decimal" step="0.1" min="0" placeholder="Pies" data-distance-feet value="${draftDistance.feet ?? ""}">
           <input type="number" inputmode="decimal" step="1" min="0" placeholder="Cent." data-distance-cm value="${draftDistance.cm ?? ""}">
@@ -601,7 +601,7 @@
     body.innerHTML = groups
       .map((row) => `
         <tr>
-          <td>${formatDate(row.date)}</td>
+          <td>${shortDate(row.date)}</td>
           ${columns.map((column) => `<td>${formatRecordCell(row.values[column.key])}</td>`).join("")}
           <td><button class="small-button delete-button" type="button" data-delete-session="${row.sessionId}" aria-label="Eliminar jornada">-</button></td>
         </tr>
