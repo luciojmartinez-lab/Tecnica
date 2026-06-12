@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#1f7edb">
+    <title>Tecnica</title>
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="icons/icon.svg">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="app-header">
+        <div class="brand">
+          <img src="icons/icon.svg" alt="" class="brand-icon" width="54" height="54">
+          <div>
+            <h1>Tecnica</h1>
+            <p><span class="live-dot" aria-hidden="true"></span>Control de saltos</p>
+          </div>
+        </div>
+        <div class="header-stack">
+          <span class="version-pill">001v1</span>
+          <span class="sync-pill" id="syncStatus">Local</span>
+        </div>
+      </header>
+
+      <nav class="tabs" aria-label="Secciones">
+        <button class="tab-button is-active" type="button" data-tab="datos">Datos</button>
+        <button class="tab-button" type="button" data-tab="graficos">Graficos</button>
+        <button class="tab-button" type="button" data-tab="config">Config.</button>
+      </nav>
+
+      <main>
+        <section class="view is-active" id="view-datos">
+          <section class="kpi-grid" id="kpiGrid" aria-label="Resumen"></section>
+
+          <section class="panel">
+            <div class="panel-title-row">
+              <h2>Entrar jornada</h2>
+              <div class="quick-actions">
+                <button class="ghost-button" type="button" id="backupTopButton">Backup</button>
+                <button class="ghost-button" type="button" id="csvTopButton">CSV</button>
+              </div>
+            </div>
+
+            <form id="sessionForm" class="session-form">
+              <div class="form-grid">
+                <label>
+                  Atleta
+                  <select id="athleteSelect" required></select>
+                </label>
+                <label>
+                  Fecha
+                  <input id="dateInput" type="date" required>
+                </label>
+                <label>
+                  Especialidad
+                  <select id="disciplineSelect" required></select>
+                </label>
+                <label>
+                  Notas
+                  <input id="notesInput" type="text" maxlength="120" placeholder="Opcional">
+                </label>
+              </div>
+
+              <div id="attemptEditor" class="attempt-editor"></div>
+
+              <div class="form-actions">
+                <button class="primary-button" type="submit">Guardar jornada</button>
+                <button class="ghost-button" type="button" id="clearDraftButton">Limpiar</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="panel data-panel">
+            <div class="panel-title-row">
+              <h2>Datos</h2>
+              <div class="toolbar">
+                <select id="sortSelect" aria-label="Orden">
+                  <option value="desc">Nuevo a viejo</option>
+                  <option value="asc">Viejo a nuevo</option>
+                </select>
+                <select id="filterDiscipline" aria-label="Especialidad"></select>
+                <select id="filterAthlete" aria-label="Atleta"></select>
+                <input id="filterText" type="search" placeholder="Filtrar" aria-label="Filtrar">
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Atleta</th>
+                    <th>Especialidad</th>
+                    <th>Columna</th>
+                    <th>Marca</th>
+                    <th>Pies</th>
+                    <th>Cent.</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="recordsBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="view-graficos">
+          <section class="panel chart-panel">
+            <div class="panel-title-row">
+              <h2>Graficos</h2>
+              <div class="toolbar">
+                <select id="chartAthlete" aria-label="Atleta"></select>
+                <select id="chartDiscipline" aria-label="Especialidad"></select>
+              </div>
+            </div>
+            <div class="metric-picker" id="metricPicker"></div>
+            <div class="chart-box">
+              <canvas id="trendChart" width="1100" height="560" aria-label="Grafico de marcas"></canvas>
+            </div>
+            <div class="chart-legend" id="chartLegend"></div>
+          </section>
+        </section>
+
+        <section class="view" id="view-config">
+          <section class="panel">
+            <h2>Atletas</h2>
+            <div class="athlete-list" id="athleteList"></div>
+            <form class="inline-form" id="athleteForm">
+              <input id="newAthleteName" type="text" maxlength="40" placeholder="Nuevo atleta" required>
+              <button class="primary-button" type="submit">Añadir</button>
+            </form>
+          </section>
+
+          <section class="panel">
+            <h2>Sincronizar</h2>
+            <div class="form-grid sync-grid">
+              <label>
+                Clave
+                <input id="syncKeyInput" type="password" autocomplete="current-password" placeholder="Clave privada">
+              </label>
+              <label>
+                Endpoint
+                <input id="syncEndpointInput" type="text" value="/api/sync">
+              </label>
+            </div>
+            <div class="form-actions">
+              <button class="primary-button" type="button" id="syncButton">Sincronizar</button>
+              <button class="ghost-button" type="button" id="pushButton">Subir</button>
+              <button class="ghost-button" type="button" id="pullButton">Descargar</button>
+            </div>
+          </section>
+
+          <section class="panel">
+            <h2>Copias</h2>
+            <div class="config-actions">
+              <button class="ghost-button" type="button" id="exportButton">Backup</button>
+              <button class="ghost-button" type="button" id="importButton">Cargar</button>
+              <button class="ghost-button" type="button" id="csvButton">CSV</button>
+              <button class="danger-button" type="button" id="resetButton">Restaurar seed</button>
+            </div>
+            <input id="importFile" type="file" accept="application/json,.json" hidden>
+          </section>
+
+          <section class="panel">
+            <details>
+              <summary>Excel importado</summary>
+              <div id="sourceNotes" class="source-notes"></div>
+            </details>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="seed-data.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,9 @@
+node_modules/
+.netlify/
+dist/
+*.xlsx
+*.xls
+*.csv
+*.zip
+_server.out
+_server.err
