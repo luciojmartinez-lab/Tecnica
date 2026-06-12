@@ -2,7 +2,7 @@
   "use strict";
 
   const STORAGE_KEY = "tecnica-state-v1";
-  const APP_VERSION = "001v6";
+  const APP_VERSION = "001v7";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -652,7 +652,7 @@
 
   function formatRecordCell(value) {
     if (!value || value.mark == null) return "";
-    return `${fmt(value.mark)}${value.attempts > 1 ? `<span class="attempt-count">${value.attempts}</span>` : ""}`;
+    return fmt(value.mark);
   }
 
   function flattenAttempts() {
