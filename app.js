@@ -2,7 +2,7 @@
   "use strict";
 
   const STORAGE_KEY = "tecnica-state-v1";
-  const APP_VERSION = "001v1";
+  const APP_VERSION = "001v2";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -95,6 +95,7 @@
     state.sessions = Array.isArray(state.sessions) ? state.sessions : [];
     state.sourceNotes = Array.isArray(state.sourceNotes) ? state.sourceNotes : [];
     state.preferences = state.preferences || {};
+    migrateLucioAthlete();
     state.sessions.forEach((session) => {
       session.attempts = Array.isArray(session.attempts) ? session.attempts : [];
       session.approachDistances = session.approachDistances || {};
@@ -108,6 +109,32 @@
       });
     });
     saveState(false);
+  }
+
+  function migrateLucioAthlete() {
+    const oldAthlete = state.athletes.find((athlete) => athlete.id === "miquel");
+    const lucioAthlete = state.athletes.find((athlete) => athlete.id === "lucio");
+
+    if (oldAthlete && lucioAthlete && oldAthlete !== lucioAthlete) {
+      state.sessions.forEach((session) => {
+        if (session.athleteId === "miquel") session.athleteId = "lucio";
+      });
+      state.athletes = state.athletes.filter((athlete) => athlete.id !== "miquel");
+      return;
+    }
+
+    if (oldAthlete) {
+      oldAthlete.id = "lucio";
+      oldAthlete.name = "Lucio";
+      state.sessions.forEach((session) => {
+        if (session.athleteId === "miquel") session.athleteId = "lucio";
+      });
+      if (state.preferences.chartAthlete === "miquel") state.preferences.chartAthlete = "lucio";
+    }
+
+    state.athletes.forEach((athlete) => {
+      if (athlete.name === "Miquel") athlete.name = "Lucio";
+    });
   }
 
   function saveState(touch = true) {

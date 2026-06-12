@@ -1,4 +1,4 @@
-const CACHE_NAME = "tecnica-001v1";
+const CACHE_NAME = "tecnica-001v2";
 const ASSETS = [
   "./",
   "index.html",

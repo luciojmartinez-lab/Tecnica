@@ -1,12 +1,12 @@
 window.TECNICA_SEED = {
   "schemaVersion": 1,
-  "appVersion": "001v1",
+  "appVersion": "001v2",
   "sourceWorkbook": "Tests_y_Triples_2025 (3).xlsx",
   "importedAt": "2026-06-12T00:00:00.000Z",
   "athletes": [
     {
-      "id": "miquel",
-      "name": "Miquel",
+      "id": "lucio",
+      "name": "Lucio",
       "active": true,
       "createdAt": "2026-06-12T00:00:00.000Z"
     },
@@ -21,7 +21,7 @@ window.TECNICA_SEED = {
     {
       "id": "01087dfd43f7",
       "date": "2025-10-01",
-      "athleteId": "miquel",
+      "athleteId": "lucio",
       "discipline": "tests",
       "notes": "Importado del Excel Tests_y_Triples_2025",
       "attempts": [
@@ -84,7 +84,7 @@ window.TECNICA_SEED = {
     {
       "id": "b652bd7b6f28",
       "date": "2025-10-01",
-      "athleteId": "miquel",
+      "athleteId": "lucio",
       "discipline": "triple",
       "notes": "Importado de la hoja Triples",
       "attempts": [
@@ -147,7 +147,7 @@ window.TECNICA_SEED = {
     {
       "id": "32bab6974b39",
       "date": "2025-10-15",
-      "athleteId": "miquel",
+      "athleteId": "lucio",
       "discipline": "tests",
       "notes": "Importado del Excel Tests_y_Triples_2025",
       "attempts": [
@@ -236,7 +236,7 @@ window.TECNICA_SEED = {
     {
       "id": "79afdbfc54b2",
       "date": "2025-10-15",
-      "athleteId": "miquel",
+      "athleteId": "lucio",
       "discipline": "triple",
       "notes": "Importado de la hoja Triples",
       "attempts": [
@@ -299,7 +299,7 @@ window.TECNICA_SEED = {
     {
       "id": "8568c241a0cc",
       "date": "2025-10-26",
-      "athleteId": "miquel",
+      "athleteId": "lucio",
       "discipline": "triple",
       "notes": "Importado de la hoja Triples",
       "attempts": [
@@ -323,7 +323,7 @@ window.TECNICA_SEED = {
     {
       "id": "a3c5fdeded20",
       "date": "2026-01-14",
-      "athleteId": "miquel",
+      "athleteId": "lucio",
       "discipline": "tests",
       "notes": "Importado del Excel Tests_y_Triples_2025",
       "attempts": [
@@ -373,7 +373,7 @@ window.TECNICA_SEED = {
     {
       "id": "976ae712538f",
       "date": "2026-01-23",
-      "athleteId": "miquel",
+      "athleteId": "lucio",
       "discipline": "tests",
       "notes": "Importado del Excel Tests_y_Triples_2025",
       "attempts": [
@@ -423,7 +423,7 @@ window.TECNICA_SEED = {
     {
       "id": "baf9378eefcb",
       "date": "2026-02-14",
-      "athleteId": "miquel",
+      "athleteId": "lucio",
       "discipline": "triple",
       "notes": "Importado de la hoja Triples",
       "attempts": [
@@ -447,7 +447,7 @@ window.TECNICA_SEED = {
     {
       "id": "be2386cdff9a",
       "date": "2026-02-25",
-      "athleteId": "miquel",
+      "athleteId": "lucio",
       "discipline": "tests",
       "notes": "Importado del Excel Tests_y_Triples_2025",
       "attempts": [
@@ -497,7 +497,7 @@ window.TECNICA_SEED = {
     {
       "id": "384e50622fe2",
       "date": "2026-03-10",
-      "athleteId": "miquel",
+      "athleteId": "lucio",
       "discipline": "tests",
       "notes": "Importado del Excel Tests_y_Triples_2025",
       "attempts": [
@@ -547,7 +547,7 @@ window.TECNICA_SEED = {
     {
       "id": "4e7c6e1b46ff",
       "date": "2026-03-10",
-      "athleteId": "miquel",
+      "athleteId": "lucio",
       "discipline": "triple",
       "notes": "Importado de la hoja Triples",
       "attempts": [
@@ -571,7 +571,7 @@ window.TECNICA_SEED = {
     {
       "id": "aa19b85e9870",
       "date": "2026-06-11",
-      "athleteId": "miquel",
+      "athleteId": "lucio",
       "discipline": "tests",
       "notes": "Importado del Excel Tests_y_Triples_2025",
       "attempts": [
@@ -639,7 +639,7 @@ window.TECNICA_SEED = {
     {
       "sheet": "Datos",
       "rows": [
-        "miquel | nuria | lucio",
+        "Lucio | Nuria",
         "1.65 | 1.35 | 2.10 | 2.21 | 2.33",
         "2.35 | 2.10 | 7.30 | 6.05 | 6.42",
         "2.4 | 2.20 | 8.1 | 10.70 | 11",
