@@ -2,7 +2,7 @@
   "use strict";
 
   const STORAGE_KEY = "tecnica-state-v1";
-  const APP_VERSION = "001v3";
+  const APP_VERSION = "001v4";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -301,7 +301,7 @@
       ["Atletas", String(state.athletes.filter((item) => item.active !== false).length), "Activos"],
       ["Jornadas", String(state.sessions.length), "Sesiones guardadas"],
       ["Intentos", String(attempts.length), "Saltos registrados"],
-      ["Ultima", lastDate ? formatDate(lastDate) : "-", best ? `${best.metricLabel}: ${fmt(best.mark)} m` : "Sin marcas"],
+      ["Ultima", lastDate ? shortDate(lastDate) : "-", best ? `${best.metricLabel}: ${fmt(best.mark)} m` : "Sin marcas"],
     ];
     $("#kpiGrid").innerHTML = cards
       .map(([label, value, foot]) => `
