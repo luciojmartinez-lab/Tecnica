@@ -1306,6 +1306,22 @@ label select {
     font-size: 0.68rem;
   }
 
+  .metric-picker {
+    flex-wrap: nowrap;
+    gap: 4px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .metric-picker label {
+    flex: 0 0 auto;
+    min-height: 28px;
+    padding: 3px 6px;
+    gap: 4px;
+    font-size: 0.72rem;
+    white-space: nowrap;
+  }
+
   .modal {
     padding: 10px;
   }

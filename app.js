@@ -2,7 +2,7 @@
   "use strict";
 
   const STORAGE_KEY = "tecnica-state-v1";
-  const APP_VERSION = "001v12";
+  const APP_VERSION = "001v13";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -38,7 +38,7 @@
       mode: "approach",
       eventName: "Altura",
       unit: "m",
-      approaches: approachList("pasos", [3, 5, 7, 9]),
+      approaches: approachList("pasos", [3, 5, 7, 9, 11, 13]),
     },
   };
 
@@ -277,7 +277,6 @@
 
   function bindForms() {
     $("#disciplineSelect").addEventListener("change", () => {
-      draft = { attempts: [] };
       renderAttemptEditor();
     });
 
@@ -477,7 +476,7 @@
         <h3>${metric.label}</h3>
         <input type="number" inputmode="decimal" step="0.01" min="0" placeholder="Marca">
         <button class="small-button" type="button" data-add-test>Añadir</button>
-        <div class="attempt-list" data-list="${metric.id}"></div>
+        <div class="attempt-list" data-list="tests:${metric.id}"></div>
       </article>
     `;
   }
@@ -488,7 +487,7 @@
         <h3 title="${esc(approach.label)}">${esc(approach.short)}</h3>
         <input type="number" inputmode="decimal" step="0.01" min="0" placeholder="Marca" data-mark>
         <button class="small-button" type="button" data-add-approach>Añadir</button>
-        <div class="attempt-list" data-list="${approach.id}"></div>
+        <div class="attempt-list" data-list="${discipline.id}:${approach.id}"></div>
       </article>
     `;
   }
@@ -502,6 +501,9 @@
     if (mark == null) return toast("Introduce una marca");
     draft.attempts.push({
       draftId: cryptoId(),
+      athleteId: $("#athleteSelect").value,
+      disciplineId: discipline.id,
+      listKey: `tests:${metric.id}`,
       eventId: metric.id,
       eventName: metric.label,
       approachId: null,
@@ -523,6 +525,9 @@
     if (mark == null) return toast("Introduce una marca");
     draft.attempts.push({
       draftId: cryptoId(),
+      athleteId: $("#athleteSelect").value,
+      disciplineId: discipline.id,
+      listKey: `${discipline.id}:${approachId}`,
       eventId: `${discipline.id}_approach`,
       eventName: discipline.eventName,
       approachId,
@@ -539,10 +544,10 @@
   function renderDraftChips() {
     $$(".attempt-list").forEach((list) => {
       const key = list.dataset.list;
-      const attempts = draft.attempts.filter((attempt) => attempt.eventId === key || attempt.approachId === key);
+      const attempts = draft.attempts.filter((attempt) => attempt.listKey === key);
       list.innerHTML = attempts
-        .map((attempt, index) => `
-          <span class="chip">${index + 1}: ${fmt(attempt.mark)} ${attempt.unit}<button type="button" data-remove-draft="${attempt.draftId}" aria-label="Quitar">x</button></span>
+        .map((attempt) => `
+          <span class="chip">${esc(athleteShort(attempt.athleteId))}: ${fmt(attempt.mark)} ${attempt.unit}<button type="button" data-remove-draft="${attempt.draftId}" aria-label="Quitar">x</button></span>
         `)
         .join("");
     });
@@ -554,47 +559,65 @@
     });
   }
 
+  function athleteShort(athleteId) {
+    const athlete = state.athletes.find((item) => item.id === athleteId);
+    const name = athlete ? athlete.name : athleteId;
+    return String(name || "").slice(0, 3);
+  }
+
   function saveSessionFromDraft() {
-    const discipline = DISCIPLINES[$("#disciplineSelect").value];
     const date = $("#dateInput").value;
-    const athleteId = $("#athleteSelect").value;
     const notes = $("#notesInput").value.trim();
     if (!draft.attempts.length) return toast("No hay marcas para guardar");
 
-    const counts = {};
-    const attempts = draft.attempts.map((attempt) => {
-      const key = attempt.approachId || attempt.eventId;
-      counts[key] = (counts[key] || 0) + 1;
-      return {
-        id: cryptoId(),
-        eventId: attempt.eventId,
-        eventName: attempt.eventName,
-        approachId: attempt.approachId,
-        approachLabel: attempt.approachLabel,
-        distanceFeet: attempt.distanceFeet ?? null,
-        distanceCm: attempt.distanceCm ?? null,
-        mark: attempt.mark,
-        unit: attempt.unit,
-        attempt: counts[key],
-      };
+    const groups = new Map();
+    draft.attempts.forEach((attempt) => {
+      const groupKey = `${attempt.athleteId}|${attempt.disciplineId}`;
+      if (!groups.has(groupKey)) {
+        groups.set(groupKey, {
+          athleteId: attempt.athleteId,
+          disciplineId: attempt.disciplineId,
+          attempts: [],
+        });
+      }
+      groups.get(groupKey).attempts.push(attempt);
     });
 
-    state.sessions.push({
-      id: cryptoId(),
-      date,
-      athleteId,
-      discipline: discipline.id,
-      notes,
-      attempts,
-      approachDistances: {},
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+    groups.forEach((group) => {
+      const counts = {};
+      const attempts = group.attempts.map((attempt) => {
+        const key = attempt.approachId || attempt.eventId;
+        counts[key] = (counts[key] || 0) + 1;
+        return {
+          id: cryptoId(),
+          eventId: attempt.eventId,
+          eventName: attempt.eventName,
+          approachId: attempt.approachId,
+          approachLabel: attempt.approachLabel,
+          distanceFeet: attempt.distanceFeet ?? null,
+          distanceCm: attempt.distanceCm ?? null,
+          mark: attempt.mark,
+          unit: attempt.unit,
+          attempt: counts[key],
+        };
+      });
+      state.sessions.push({
+        id: cryptoId(),
+        date,
+        athleteId: group.athleteId,
+        discipline: group.disciplineId,
+        notes,
+        attempts,
+        approachDistances: {},
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
     });
     draft = { attempts: [] };
     $("#notesInput").value = "";
     saveState();
     renderAll();
-    toast("Jornada guardada");
+    toast(groups.size === 1 ? "Jornada guardada" : `${groups.size} jornadas guardadas`);
   }
 
   function renderRecords() {
