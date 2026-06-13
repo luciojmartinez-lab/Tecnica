@@ -8,7 +8,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="icons/icon.svg">
-    <link rel="stylesheet" href="styles.css?v=001v13">
+    <link rel="stylesheet" href="styles.css?v=001v14">
   </head>
   <body>
     <div class="app-shell">
@@ -21,7 +21,7 @@
           </div>
         </div>
         <div class="header-stack">
-          <span class="version-pill">001v13</span>
+          <span class="version-pill">001v14</span>
           <span class="sync-pill" id="syncStatus">Local</span>
         </div>
       </header>
@@ -114,6 +114,10 @@
               <div class="toolbar">
                 <select id="chartAthlete" aria-label="Atleta"></select>
                 <select id="chartDiscipline" aria-label="Especialidad"></select>
+                <select id="chartMode" aria-label="Tipo de grafico">
+                  <option value="date">Fecha</option>
+                  <option value="approach">Zancadas</option>
+                </select>
               </div>
             </div>
             <div class="metric-picker" id="metricPicker"></div>
@@ -200,7 +204,7 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="seed-data.js?v=001v13"></script>
-    <script src="app.js?v=001v13"></script>
+    <script src="seed-data.js?v=001v14"></script>
+    <script src="app.js?v=001v14"></script>
   </body>
 </html>

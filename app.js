@@ -2,7 +2,7 @@
   "use strict";
 
   const STORAGE_KEY = "tecnica-state-v1";
-  const APP_VERSION = "001v13";
+  const APP_VERSION = "001v14";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -356,10 +356,17 @@
     $("#chartAthlete").addEventListener("change", () => {
       state.preferences.chartAthlete = $("#chartAthlete").value;
       saveState(false);
+      renderMetricPicker();
       drawChart();
     });
     $("#chartDiscipline").addEventListener("change", () => {
       state.preferences.chartDiscipline = $("#chartDiscipline").value;
+      saveState(false);
+      renderMetricPicker();
+      drawChart();
+    });
+    $("#chartMode").addEventListener("change", () => {
+      state.preferences.chartMode = $("#chartMode").value;
       saveState(false);
       renderMetricPicker();
       drawChart();
@@ -426,6 +433,7 @@
 
     if (state.preferences.chartAthlete) $("#chartAthlete").value = state.preferences.chartAthlete;
     $("#chartDiscipline").value = state.preferences.chartDiscipline || "tests";
+    $("#chartMode").value = state.preferences.chartMode || "date";
     $("#sortSelect").value = previousFilters.sortSelect;
     $("#filterDiscipline").value = previousFilters.filterDiscipline;
     $("#filterAthlete").value = previousFilters.filterAthlete;
@@ -1064,9 +1072,13 @@
 
   function renderMetricPicker() {
     const discipline = DISCIPLINES[$("#chartDiscipline").value] || DISCIPLINES.tests;
-    const metrics = metricOptions(discipline);
-    const selected = new Set(state.preferences.chartMetrics?.[discipline.id] || metrics.slice(0, 3).map((item) => item.key));
-    $("#metricPicker").innerHTML = metrics
+    const mode = $("#chartMode")?.value || "date";
+    const options = mode === "approach" && discipline.mode === "approach"
+      ? approachDateOptions(discipline)
+      : metricOptions(discipline);
+    const prefKey = mode === "approach" ? `${discipline.id}:dates` : discipline.id;
+    const selected = new Set(state.preferences.chartMetrics?.[prefKey] || options.slice(0, 5).map((item) => item.key));
+    $("#metricPicker").innerHTML = options
       .map((metric) => `
         <label>
           <input type="checkbox" value="${esc(metric.key)}" ${selected.has(metric.key) ? "checked" : ""}>
@@ -1081,6 +1093,15 @@
       return discipline.metrics.map((metric) => ({ key: metric.id, label: metric.label }));
     }
     return discipline.approaches.map((approach) => ({ key: `${discipline.id}:${approach.id}`, label: approach.short }));
+  }
+
+  function approachDateOptions(discipline) {
+    const athleteId = $("#chartAthlete").value;
+    return Array.from(new Set(flattenAttempts()
+      .filter((row) => row.athleteId === athleteId && row.discipline === discipline.id)
+      .map((row) => row.date)))
+      .sort((a, b) => b.localeCompare(a))
+      .map((date) => ({ key: date, label: shortDate(date) }));
   }
 
   function drawChart() {
@@ -1098,10 +1119,17 @@
 
     const discipline = DISCIPLINES[$("#chartDiscipline").value] || DISCIPLINES.tests;
     const athleteId = $("#chartAthlete").value;
+    const mode = $("#chartMode")?.value || "date";
     const checked = $$("input:checked", $("#metricPicker")).map((input) => input.value);
     state.preferences.chartMetrics = state.preferences.chartMetrics || {};
-    state.preferences.chartMetrics[discipline.id] = checked;
+    const prefKey = mode === "approach" && discipline.mode === "approach" ? `${discipline.id}:dates` : discipline.id;
+    state.preferences.chartMetrics[prefKey] = checked;
     saveState(false);
+
+    if (mode === "approach" && discipline.mode === "approach") {
+      drawApproachChart(ctx, width, height, discipline, athleteId, checked);
+      return;
+    }
 
     const rows = flattenAttempts().filter((row) => row.athleteId === athleteId && checked.includes(row.metricKey));
     const grouped = new Map();
@@ -1191,6 +1219,103 @@
     $("#chartLegend").innerHTML = metrics
       .map((metric, index) => `<span class="legend-item"><span class="legend-swatch" style="background:${COLORS[index % COLORS.length]}"></span>${esc(metric.label)}</span>`)
       .join("");
+  }
+
+  function drawApproachChart(ctx, width, height, discipline, athleteId, checkedDates) {
+    const approaches = discipline.approaches;
+    const rows = flattenAttempts().filter((row) => row.athleteId === athleteId && row.discipline === discipline.id);
+    const selectedDates = checkedDates.length ? checkedDates : approachDateOptions(discipline).slice(0, 5).map((item) => item.key);
+    const grouped = new Map();
+    rows.forEach((row) => {
+      if (!selectedDates.includes(row.date)) return;
+      const key = `${row.date}|${row.approachId}`;
+      const current = grouped.get(key);
+      if (!current || row.mark > current.mark) grouped.set(key, row);
+    });
+    const values = Array.from(grouped.values()).map((row) => row.mark);
+
+    if (!values.length) {
+      drawEmptyChart(ctx, width, height, "Sin marcas para estas zancadas");
+      $("#chartLegend").innerHTML = "";
+      return;
+    }
+
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const pad = Math.max(0.1, (max - min) * 0.18);
+    const yMin = Math.max(0, min - pad);
+    const yMax = max + pad;
+    const left = 58;
+    const right = 24;
+    const top = 28;
+    const bottom = 48;
+    const plotW = width - left - right;
+    const plotH = height - top - bottom;
+    const xAt = (index) => left + (approaches.length === 1 ? plotW / 2 : (plotW * index) / (approaches.length - 1));
+    const yAt = (value) => top + plotH - ((value - yMin) / (yMax - yMin || 1)) * plotH;
+
+    drawChartFrame(ctx, width, height, left, right, top, bottom, yMin, yMax, yAt);
+
+    ctx.fillStyle = "#637084";
+    ctx.font = "12px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    approaches.forEach((approach, index) => {
+      ctx.fillText(approach.short, xAt(index), height - bottom + 16);
+    });
+
+    selectedDates.forEach((date, dateIndex) => {
+      const color = COLORS[dateIndex % COLORS.length];
+      const points = approaches
+        .map((approach, index) => {
+          const row = grouped.get(`${date}|${approach.id}`);
+          return row ? { x: xAt(index), y: yAt(row.mark), value: row.mark } : null;
+        })
+        .filter(Boolean);
+      if (!points.length) return;
+      drawChartLine(ctx, points, color);
+    });
+
+    $("#chartLegend").innerHTML = selectedDates
+      .map((date, index) => `<span class="legend-item"><span class="legend-swatch" style="background:${COLORS[index % COLORS.length]}"></span>${shortDate(date)}</span>`)
+      .join("");
+  }
+
+  function drawChartFrame(ctx, width, height, left, right, top, bottom, yMin, yMax, yAt) {
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, width, height);
+    ctx.strokeStyle = "#d7dee8";
+    ctx.lineWidth = 1;
+    ctx.fillStyle = "#637084";
+    ctx.font = "12px system-ui, sans-serif";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    for (let i = 0; i <= 5; i += 1) {
+      const value = yMin + ((yMax - yMin) * i) / 5;
+      const y = yAt(value);
+      ctx.beginPath();
+      ctx.moveTo(left, y);
+      ctx.lineTo(width - right, y);
+      ctx.stroke();
+      ctx.fillText(fmt(value), left - 8, y);
+    }
+  }
+
+  function drawChartLine(ctx, points, color) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    points.forEach((point, index) => {
+      if (index === 0) ctx.moveTo(point.x, point.y);
+      else ctx.lineTo(point.x, point.y);
+    });
+    ctx.stroke();
+    points.forEach((point) => {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, 4, 0, Math.PI * 2);
+      ctx.fill();
+    });
   }
 
   function drawEmptyChart(ctx, width, height, message) {
