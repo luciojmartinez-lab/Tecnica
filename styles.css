@@ -628,6 +628,14 @@ label select {
   background: var(--soft);
 }
 
+.athlete-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .distance-config {
   display: grid;
   gap: 14px;
@@ -1203,41 +1211,57 @@ label select {
   }
 
   .distance-config {
-    gap: 8px;
-  }
-
-  .distance-athlete {
-    gap: 8px;
-    padding: 8px;
-  }
-
-  .distance-athlete h3 {
-    font-size: 0.95rem;
-  }
-
-  .distance-discipline {
     gap: 5px;
   }
 
+  .athlete-list {
+    gap: 5px;
+    margin: 7px 0 8px;
+  }
+
+  .athlete-row {
+    gap: 6px;
+    min-height: 34px;
+    padding: 5px 6px;
+  }
+
+  .athlete-actions {
+    gap: 4px;
+    flex-wrap: nowrap;
+  }
+
+  .distance-athlete {
+    gap: 5px;
+    padding: 6px;
+  }
+
+  .distance-athlete h3 {
+    font-size: 0.86rem;
+  }
+
+  .distance-discipline {
+    gap: 3px;
+  }
+
   .distance-discipline strong {
-    font-size: 0.78rem;
+    font-size: 0.72rem;
   }
 
   .distance-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 5px;
+    gap: 3px 4px;
   }
 
   .distance-row {
-    grid-template-columns: 26px minmax(0, 1fr) minmax(0, 1fr);
-    gap: 3px;
-    font-size: 0.72rem;
+    grid-template-columns: 24px minmax(0, 1fr) minmax(0, 1fr);
+    gap: 2px;
+    font-size: 0.68rem;
   }
 
   .distance-row input {
-    min-height: 29px;
-    padding: 3px 5px;
-    font-size: 0.72rem;
+    min-height: 26px;
+    padding: 2px 5px;
+    font-size: 0.68rem;
   }
 
   .modal {

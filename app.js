@@ -2,7 +2,7 @@
   "use strict";
 
   const STORAGE_KEY = "tecnica-state-v1";
-  const APP_VERSION = "001v10";
+  const APP_VERSION = "001v11";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -99,6 +99,7 @@
     state.settings = state.settings || {};
     state.settings.approachDistances = state.settings.approachDistances || {};
     migrateLucioAthlete();
+    mergeDuplicateAthletes();
     state.sessions.forEach((session) => {
       session.attempts = Array.isArray(session.attempts) ? session.attempts : [];
       session.approachDistances = session.approachDistances || {};
@@ -185,6 +186,67 @@
     });
   }
 
+  function mergeDuplicateAthletes(target = state) {
+    target.athletes = Array.isArray(target.athletes) ? target.athletes : [];
+    target.sessions = Array.isArray(target.sessions) ? target.sessions : [];
+    target.preferences = target.preferences || {};
+    target.settings = target.settings || {};
+    target.settings.approachDistances = target.settings.approachDistances || {};
+
+    const groups = new Map();
+    target.athletes.forEach((athlete) => {
+      const key = normalize(athlete.name || athlete.id);
+      if (!key) return;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(athlete);
+    });
+
+    const idMap = new Map();
+    const merged = [];
+    groups.forEach((athletes, key) => {
+      const canonical = athletes.find((athlete) => athlete.id === key)
+        || (key === "lucio" ? athletes.find((athlete) => athlete.id === "lucio") : null)
+        || athletes[0];
+      canonical.active = athletes.some((athlete) => athlete.active !== false);
+      athletes.forEach((athlete) => {
+        if (athlete === canonical) return;
+        idMap.set(athlete.id, canonical.id);
+        mergeAthleteDistances(target, canonical.id, athlete.id);
+      });
+      merged.push(canonical);
+    });
+
+    if (!idMap.size) return;
+    target.sessions.forEach((session) => {
+      if (idMap.has(session.athleteId)) session.athleteId = idMap.get(session.athleteId);
+    });
+    ["chartAthlete", "filterAthlete"].forEach((key) => {
+      if (idMap.has(target.preferences[key])) target.preferences[key] = idMap.get(target.preferences[key]);
+    });
+    idMap.forEach((_, oldId) => {
+      delete target.settings.approachDistances[oldId];
+    });
+    target.athletes = merged;
+  }
+
+  function mergeAthleteDistances(target, keepId, removeId) {
+    const settings = target.settings.approachDistances;
+    const keep = settings[keepId] || {};
+    const remove = settings[removeId] || {};
+    Object.keys(remove).forEach((disciplineId) => {
+      keep[disciplineId] = keep[disciplineId] || {};
+      Object.keys(remove[disciplineId] || {}).forEach((approachId) => {
+        const saved = keep[disciplineId][approachId] || {};
+        const incoming = remove[disciplineId][approachId] || {};
+        keep[disciplineId][approachId] = {
+          feet: hasOwn(saved, "feet") && saved.feet != null ? saved.feet : incoming.feet ?? null,
+          cm: hasOwn(saved, "cm") && saved.cm != null ? saved.cm : incoming.cm ?? null,
+        };
+      });
+    });
+    settings[keepId] = keep;
+  }
+
   function saveState(touch = true) {
     if (touch) state.updatedAt = new Date().toISOString();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -247,8 +309,12 @@
     });
 
     $("#athleteList").addEventListener("click", (event) => {
-      const button = event.target.closest("[data-toggle-athlete]");
+      const button = event.target.closest("[data-toggle-athlete], [data-delete-athlete]");
       if (!button) return;
+      if (button.dataset.deleteAthlete) {
+        deleteAthlete(button.dataset.deleteAthlete);
+        return;
+      }
       const athlete = state.athletes.find((item) => item.id === button.dataset.toggleAthlete);
       if (!athlete) return;
       athlete.active = !athlete.active;
@@ -818,10 +884,45 @@
       .map((athlete) => `
         <div class="athlete-row">
           <strong>${esc(athlete.name)}</strong>
-          <button class="small-button" type="button" data-toggle-athlete="${esc(athlete.id)}">${athlete.active === false ? "Activar" : "Ocultar"}</button>
+          <div class="athlete-actions">
+            <button class="small-button" type="button" data-toggle-athlete="${esc(athlete.id)}">${athlete.active === false ? "Activar" : "Ocultar"}</button>
+            <button class="small-button delete-button" type="button" data-delete-athlete="${esc(athlete.id)}">Eliminar</button>
+          </div>
         </div>
       `)
       .join("");
+  }
+
+  function deleteAthlete(athleteId) {
+    const athlete = state.athletes.find((item) => item.id === athleteId);
+    if (!athlete) return;
+    const sameName = state.athletes.filter((item) => item.id !== athleteId && normalize(item.name) === normalize(athlete.name));
+    const target = sameName.find((item) => item.id === "lucio") || sameName[0];
+    const sessionsCount = state.sessions.filter((session) => session.athleteId === athleteId).length;
+    const message = target
+      ? `Eliminar ${athlete.name} duplicado y pasar sus jornadas a ${target.name}?`
+      : sessionsCount
+        ? `Eliminar ${athlete.name} y sus ${sessionsCount} jornadas?`
+        : `Eliminar ${athlete.name}?`;
+    if (!confirm(message)) return;
+
+    if (target) {
+      state.sessions.forEach((session) => {
+        if (session.athleteId === athleteId) session.athleteId = target.id;
+      });
+      mergeAthleteDistances(state, target.id, athleteId);
+    } else {
+      state.sessions = state.sessions.filter((session) => session.athleteId !== athleteId);
+    }
+    delete state.settings?.approachDistances?.[athleteId];
+    state.athletes = state.athletes.filter((item) => item.id !== athleteId);
+    const fallbackAthlete = state.athletes[0]?.id || "";
+    ["chartAthlete", "filterAthlete"].forEach((key) => {
+      if (state.preferences[key] === athleteId) state.preferences[key] = fallbackAthlete;
+    });
+    saveState();
+    renderAll();
+    toast("Atleta eliminado");
   }
 
   function renderDistanceConfig() {
@@ -893,7 +994,7 @@
     if (discipline.mode === "tests") {
       return discipline.metrics.map((metric) => ({ key: metric.id, label: metric.label }));
     }
-    return discipline.approaches.map((approach) => ({ key: `${discipline.id}:${approach.id}`, label: approach.label }));
+    return discipline.approaches.map((approach) => ({ key: `${discipline.id}:${approach.id}`, label: approach.short }));
   }
 
   function drawChart() {
@@ -1105,6 +1206,7 @@
     next.sessions = Array.isArray(next.sessions) ? next.sessions : [];
     next.preferences = next.preferences || {};
     migrateLucioAthlete(next);
+    mergeDuplicateAthletes(next);
     migrateApproachDistanceSettings(next);
     return next;
   }

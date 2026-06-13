@@ -1,6 +1,6 @@
 window.TECNICA_SEED = {
   "schemaVersion": 1,
-  "appVersion": "001v10",
+  "appVersion": "001v11",
   "sourceWorkbook": "Tests_y_Triples_2025 (3).xlsx",
   "importedAt": "2026-06-12T00:00:00.000Z",
   "athletes": [
