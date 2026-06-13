@@ -353,6 +353,10 @@ label select {
   min-height: 28px;
 }
 
+.attempt-list:empty {
+  display: none;
+}
+
 .chip {
   display: inline-flex;
   align-items: center;
@@ -650,9 +654,21 @@ label select {
   background: var(--soft);
 }
 
+.distance-athlete-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .distance-athlete h3 {
   margin: 0;
   font-size: 1.08rem;
+}
+
+.distance-athlete-body {
+  display: grid;
+  gap: 10px;
 }
 
 .distance-discipline {
@@ -671,6 +687,16 @@ label select {
   align-items: center;
   gap: 5px;
   color: var(--ink);
+}
+
+.height-distance-row {
+  grid-template-columns: 36px minmax(0, 1fr) 14px minmax(0, 1fr);
+}
+
+.distance-cross {
+  color: var(--muted);
+  font-weight: 900;
+  text-align: center;
 }
 
 .distance-row span {
@@ -993,7 +1019,7 @@ label select {
   .approach-grid {
     grid-template-columns: 1fr;
     gap: 0;
-    padding: 3px 5px;
+    padding: 2px 4px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
     background: var(--soft);
@@ -1020,14 +1046,14 @@ label select {
   .tests-grid .attempt-card {
     grid-template-columns: minmax(70px, 0.9fr) minmax(0, 1fr) minmax(56px, auto);
     align-items: center;
-    gap: 4px;
-    padding: 4px 0;
+    gap: 3px;
+    padding: 2px 0;
   }
 
   .tests-grid .attempt-card h3,
   .approach-grid .attempt-card h3 {
     text-align: center;
-    font-size: 0.72rem;
+    font-size: 0.7rem;
     line-height: 1.15;
   }
 
@@ -1035,7 +1061,7 @@ label select {
   .tests-grid .attempt-card button,
   .approach-grid .attempt-card input,
   .approach-grid .attempt-card button {
-    min-height: 28px;
+    min-height: 26px;
     padding: 3px 5px;
     font-size: 0.7rem;
   }
@@ -1043,14 +1069,14 @@ label select {
   .tests-grid .attempt-list,
   .approach-grid .attempt-list {
     grid-column: 1 / -1;
-    min-height: 14px;
+    min-height: 10px;
   }
 
   .approach-grid .attempt-card {
     grid-template-columns: 32px minmax(0, 1fr) 30px;
     align-items: center;
-    gap: 4px;
-    padding: 4px 0;
+    gap: 3px;
+    padding: 2px 0;
   }
 
   .approach-grid .attempt-card .mini-grid {
@@ -1231,12 +1257,20 @@ label select {
   }
 
   .distance-athlete {
-    gap: 5px;
-    padding: 6px;
+    gap: 4px;
+    padding: 5px 6px;
   }
 
   .distance-athlete h3 {
     font-size: 0.86rem;
+  }
+
+  .distance-athlete-header {
+    min-height: 26px;
+  }
+
+  .distance-athlete-body {
+    gap: 4px;
   }
 
   .distance-discipline {
@@ -1256,6 +1290,14 @@ label select {
     grid-template-columns: 24px minmax(0, 1fr) minmax(0, 1fr);
     gap: 2px;
     font-size: 0.68rem;
+  }
+
+  .height-distance-row {
+    grid-template-columns: 24px minmax(0, 1fr) 10px minmax(0, 1fr);
+  }
+
+  .distance-cross {
+    font-size: 0.7rem;
   }
 
   .distance-row input {

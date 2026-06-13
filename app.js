@@ -2,7 +2,7 @@
   "use strict";
 
   const STORAGE_KEY = "tecnica-state-v1";
-  const APP_VERSION = "001v11";
+  const APP_VERSION = "001v12";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -134,10 +134,17 @@
             const saved = target.settings.approachDistances[athlete.id][discipline.id][approach.id] || {};
             const legacyGlobal = athlete.id === "lucio" ? oldGlobalDistances[discipline.id]?.[approach.id] || {} : {};
             const migrated = findLegacyDistance(target, athlete.id, discipline.id, approach.id);
-            target.settings.approachDistances[athlete.id][discipline.id][approach.id] = {
+            const distance = {
               feet: hasOwn(saved, "feet") ? saved.feet : migrated.feet ?? legacyGlobal.feet ?? null,
               cm: hasOwn(saved, "cm") ? saved.cm : migrated.cm ?? legacyGlobal.cm ?? null,
             };
+            if (discipline.id === "altura") {
+              distance.horizontal = hasOwn(saved, "horizontal") ? saved.horizontal : (saved.feet ?? migrated.feet ?? legacyGlobal.feet ?? null);
+              distance.vertical = hasOwn(saved, "vertical") ? saved.vertical : (saved.cm ?? migrated.cm ?? legacyGlobal.cm ?? null);
+              distance.feet = null;
+              distance.cm = null;
+            }
+            target.settings.approachDistances[athlete.id][discipline.id][approach.id] = distance;
           });
         });
     });
@@ -241,6 +248,8 @@
         keep[disciplineId][approachId] = {
           feet: hasOwn(saved, "feet") && saved.feet != null ? saved.feet : incoming.feet ?? null,
           cm: hasOwn(saved, "cm") && saved.cm != null ? saved.cm : incoming.cm ?? null,
+          horizontal: hasOwn(saved, "horizontal") && saved.horizontal != null ? saved.horizontal : incoming.horizontal ?? null,
+          vertical: hasOwn(saved, "vertical") && saved.vertical != null ? saved.vertical : incoming.vertical ?? null,
         };
       });
     });
@@ -322,6 +331,11 @@
       renderAll();
     });
 
+    $("#distanceConfig").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-toggle-distance-athlete]");
+      if (!button) return;
+      toggleDistanceAthlete(button.dataset.toggleDistanceAthlete);
+    });
     $("#distanceConfig").addEventListener("input", (event) => {
       const input = event.target.closest("[data-distance-field]");
       if (!input) return;
@@ -927,30 +941,63 @@
 
   function renderDistanceConfig() {
     const disciplines = Object.values(DISCIPLINES).filter((discipline) => discipline.mode === "approach");
+    const expanded = new Set(state.preferences.expandedDistanceAthletes || []);
     $("#distanceConfig").innerHTML = state.athletes
-      .map((athlete) => `
-        <section class="distance-athlete">
-          <h3>${esc(athlete.name)}</h3>
-          ${disciplines.map((discipline) => `
-            <div class="distance-discipline">
-              <strong>${esc(discipline.label)}</strong>
-              <div class="distance-grid">
-                ${discipline.approaches.map((approach) => {
-                  const distance = getConfiguredDistance(athlete.id, discipline.id, approach.id);
-                  return `
-                    <label class="distance-row">
-                      <span>${esc(approach.short)}</span>
-                      <input data-distance-field="feet" data-athlete="${esc(athlete.id)}" data-discipline="${discipline.id}" data-approach="${approach.id}" inputmode="decimal" value="${distance.feet == null ? "" : fmt(distance.feet)}" placeholder="pies">
-                      <input data-distance-field="cm" data-athlete="${esc(athlete.id)}" data-discipline="${discipline.id}" data-approach="${approach.id}" inputmode="decimal" value="${formatCm(distance.cm)}" placeholder="cm">
-                    </label>
-                  `;
-                }).join("")}
-              </div>
+      .map((athlete) => {
+        const isExpanded = expanded.has(athlete.id);
+        return `
+          <section class="distance-athlete ${isExpanded ? "is-open" : ""}">
+            <div class="distance-athlete-header">
+              <h3>${esc(athlete.name)}</h3>
+              <button class="inline-plus" type="button" data-toggle-distance-athlete="${esc(athlete.id)}" aria-label="${isExpanded ? "Cerrar distancias" : "Abrir distancias"}">${isExpanded ? "Cerrar" : "+"}</button>
             </div>
-          `).join("")}
-        </section>
-      `)
+            ${isExpanded ? `
+              <div class="distance-athlete-body">
+                ${disciplines.map((discipline) => `
+                  <div class="distance-discipline">
+                    <strong>${esc(discipline.label)}</strong>
+                    <div class="distance-grid ${discipline.id === "altura" ? "height-distance-grid" : ""}">
+                      ${discipline.approaches.map((approach) => renderDistanceRow(athlete, discipline, approach)).join("")}
+                    </div>
+                  </div>
+                `).join("")}
+              </div>
+            ` : ""}
+          </section>
+        `;
+      })
       .join("");
+  }
+
+  function renderDistanceRow(athlete, discipline, approach) {
+    const distance = getConfiguredDistance(athlete.id, discipline.id, approach.id);
+    if (discipline.id === "altura") {
+      return `
+        <label class="distance-row height-distance-row">
+          <span>${esc(approach.short)}</span>
+          <input data-distance-field="horizontal" data-athlete="${esc(athlete.id)}" data-discipline="${discipline.id}" data-approach="${approach.id}" inputmode="decimal" value="${distance.horizontal == null ? "" : fmt(distance.horizontal)}" placeholder="horiz.">
+          <span class="distance-cross">x</span>
+          <input data-distance-field="vertical" data-athlete="${esc(athlete.id)}" data-discipline="${discipline.id}" data-approach="${approach.id}" inputmode="decimal" value="${distance.vertical == null ? "" : fmt(distance.vertical)}" placeholder="vert.">
+        </label>
+      `;
+    }
+    return `
+      <label class="distance-row">
+        <span>${esc(approach.short)}</span>
+        <input data-distance-field="feet" data-athlete="${esc(athlete.id)}" data-discipline="${discipline.id}" data-approach="${approach.id}" inputmode="decimal" value="${distance.feet == null ? "" : fmt(distance.feet)}" placeholder="pies">
+        <input data-distance-field="cm" data-athlete="${esc(athlete.id)}" data-discipline="${discipline.id}" data-approach="${approach.id}" inputmode="decimal" value="${formatCm(distance.cm)}" placeholder="cm">
+      </label>
+    `;
+  }
+
+  function toggleDistanceAthlete(athleteId) {
+    state.preferences.expandedDistanceAthletes = state.preferences.expandedDistanceAthletes || [];
+    const expanded = new Set(state.preferences.expandedDistanceAthletes);
+    if (expanded.has(athleteId)) expanded.delete(athleteId);
+    else expanded.add(athleteId);
+    state.preferences.expandedDistanceAthletes = Array.from(expanded);
+    saveState(false);
+    renderDistanceConfig();
   }
 
   function updateConfiguredDistance(input) {
@@ -962,6 +1009,10 @@
     state.settings.approachDistances[athleteId][disciplineId] = state.settings.approachDistances[athleteId][disciplineId] || {};
     const distance = state.settings.approachDistances[athleteId][disciplineId][approachId] || { feet: null, cm: null };
     distance[field] = field === "cm" ? parseCmInput(input.value) : parseOptional(input.value);
+    if (disciplineId === "altura") {
+      distance.feet = null;
+      distance.cm = null;
+    }
     state.settings.approachDistances[athleteId][disciplineId][approachId] = distance;
     saveState();
   }
@@ -970,9 +1021,21 @@
     const configured = state.settings?.approachDistances?.[athleteId]?.[disciplineId]?.[approachId] || {};
     const legacy = session?.approachDistances?.[approachId] || {};
     const attemptLegacy = session?.attempts?.find((attempt) => attempt.approachId === approachId && (attempt.distanceFeet != null || attempt.distanceCm != null));
+    const feet = hasOwn(configured, "feet") ? configured.feet : legacy.feet ?? attemptLegacy?.distanceFeet ?? null;
+    const cm = hasOwn(configured, "cm") ? configured.cm : legacy.cm ?? attemptLegacy?.distanceCm ?? null;
+    if (disciplineId === "altura") {
+      return {
+        feet: null,
+        cm: null,
+        horizontal: hasOwn(configured, "horizontal") ? configured.horizontal : (configured.feet ?? legacy.feet ?? attemptLegacy?.distanceFeet ?? null),
+        vertical: hasOwn(configured, "vertical") ? configured.vertical : (configured.cm ?? legacy.cm ?? attemptLegacy?.distanceCm ?? null),
+      };
+    }
     return {
-      feet: hasOwn(configured, "feet") ? configured.feet : legacy.feet ?? attemptLegacy?.distanceFeet ?? null,
-      cm: hasOwn(configured, "cm") ? configured.cm : legacy.cm ?? attemptLegacy?.distanceCm ?? null,
+      feet,
+      cm,
+      horizontal: feet,
+      vertical: cm,
     };
   }
 
