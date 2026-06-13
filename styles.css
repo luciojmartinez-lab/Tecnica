@@ -244,6 +244,7 @@ h2 {
 .toolbar select,
 .form-grid input,
 .form-grid select,
+.password-row input,
 .inline-form input,
 .attempt-card input {
   min-height: 44px;
@@ -252,6 +253,33 @@ h2 {
   padding: 8px 11px;
   background: #fff;
   color: var(--ink);
+}
+
+.password-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  gap: 6px;
+}
+
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--ink);
+}
+
+.icon-button svg {
+  width: 21px;
+  height: 21px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .toolbar input {
@@ -437,10 +465,55 @@ label select {
 }
 
 .delete-button {
-  min-width: 34px;
+  min-width: 66px;
   padding-inline: 8px;
-  font-size: 1.2rem;
+  font-size: 0.78rem;
+  font-weight: 780;
   line-height: 1;
+}
+
+.inline-plus {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 4px;
+  padding: 0 5px;
+  border: 1px solid #9db8d8;
+  border-radius: 8px;
+  background: #eef6ff;
+  color: #195f9e;
+  font-size: 0.78rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.record-cell-content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 3px;
+  min-width: 0;
+}
+
+.record-best,
+.record-attempt.is-best {
+  color: var(--blue-700);
+  font-weight: 850;
+}
+
+.record-attempt-list {
+  display: grid;
+  width: 100%;
+  gap: 2px;
+  margin-top: 3px;
+}
+
+.record-attempt {
+  display: block;
+  line-height: 1.2;
 }
 
 .attempt-count {
@@ -555,6 +628,124 @@ label select {
   background: var(--soft);
 }
 
+.distance-config {
+  display: grid;
+  gap: 14px;
+}
+
+.distance-athlete {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--soft);
+}
+
+.distance-athlete h3 {
+  margin: 0;
+  font-size: 1.08rem;
+}
+
+.distance-discipline {
+  display: grid;
+  gap: 8px;
+}
+
+.distance-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.distance-row {
+  grid-template-columns: 36px minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  color: var(--ink);
+}
+
+.distance-row span {
+  font-weight: 800;
+  text-align: center;
+}
+
+.distance-row input {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: 6px 7px;
+}
+
+.modal[hidden] {
+  display: none;
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(20, 32, 51, 0.36);
+}
+
+.modal-card {
+  position: relative;
+  z-index: 1;
+  width: min(92vw, 420px);
+  max-height: min(78vh, 520px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
+
+.modal-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.modal-subtitle {
+  color: var(--muted);
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.attempt-modal-list {
+  display: grid;
+  gap: 6px;
+}
+
+.attempt-modal-row {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--soft);
+}
+
+.attempt-modal-row.is-best {
+  border-color: #7db798;
+  background: #ecfdf3;
+}
+
 .inline-form {
   align-items: stretch;
 }
@@ -634,100 +825,148 @@ label select {
 
 @media (max-width: 620px) {
   .app-header {
-    align-items: flex-start;
-    padding: 18px 16px 20px;
+    align-items: center;
+    padding: 8px 10px 9px;
   }
 
   .brand {
-    align-items: flex-start;
+    align-items: center;
+    gap: 8px;
   }
 
   .brand-icon {
-    width: 46px;
-    height: 46px;
+    width: 32px;
+    height: 32px;
+  }
+
+  h1 {
+    font-size: 1.55rem;
+  }
+
+  .brand p {
+    gap: 5px;
+    margin-top: 2px;
+    font-size: 0.82rem;
+  }
+
+  .live-dot {
+    width: 8px;
+    height: 8px;
+    box-shadow: 0 0 0 3px rgba(65, 223, 124, 0.16);
   }
 
   .header-stack {
-    gap: 6px;
+    gap: 3px;
   }
 
   .version-pill {
-    min-height: 34px;
-    padding: 6px 10px;
+    min-height: 24px;
+    padding: 3px 7px;
+    font-size: 0.72rem;
   }
 
   .sync-pill {
-    max-width: 118px;
+    max-width: 76px;
+    min-height: 20px;
+    padding: 2px 6px;
+    font-size: 0.62rem;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
   .tabs {
-    gap: 8px;
-    padding: 14px 12px 16px;
+    gap: 6px;
+    padding: 8px 8px 9px;
   }
 
   .tab-button {
-    min-height: 56px;
+    min-height: 40px;
+    font-size: 1rem;
   }
 
   main {
-    padding: 14px 12px 32px;
+    padding: 6px 6px 18px;
   }
 
   .panel {
-    padding: 14px;
+    padding: 8px;
+    margin-bottom: 8px;
+  }
+
+  .panel-title-row {
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+
+  h2 {
+    font-size: 1.08rem;
+  }
+
+  .quick-actions,
+  .form-actions {
+    gap: 5px;
+  }
+
+  .primary-button,
+  .ghost-button,
+  .danger-button,
+  .small-button {
+    min-height: 30px;
+    padding: 4px 8px;
+    font-size: 0.76rem;
   }
 
   .kpi-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 6px;
-    margin-bottom: 12px;
+    gap: 5px;
+    margin-bottom: 8px;
   }
 
   .kpi-card {
-    min-height: 76px;
-    padding: 8px 6px;
+    min-height: 48px;
+    padding: 6px 4px;
   }
 
   .kpi-label {
-    font-size: 0.56rem;
+    font-size: 0.47rem;
     line-height: 1.1;
   }
 
   .kpi-value {
-    margin-top: 7px;
-    font-size: clamp(1.15rem, 7vw, 1.7rem);
+    margin-top: 4px;
+    font-size: clamp(0.98rem, 5.6vw, 1.32rem);
     overflow-wrap: anywhere;
   }
 
   .kpi-card:nth-child(4) .kpi-value {
-    font-size: clamp(0.78rem, 3.8vw, 1rem);
+    font-size: clamp(0.72rem, 3.5vw, 0.9rem);
     line-height: 1.12;
   }
 
   .kpi-foot {
-    margin-top: 3px;
-    font-size: 0.58rem;
-    line-height: 1.15;
+    display: none;
+  }
+
+  .session-form {
+    gap: 6px;
   }
 
   .session-form .form-grid {
     grid-template-columns: 1fr 1fr 1fr;
-    gap: 7px;
+    gap: 4px;
   }
 
   .session-form .form-grid label {
-    gap: 4px;
-    font-size: 0.68rem;
+    gap: 2px;
+    font-size: 0.56rem;
   }
 
   .session-form .form-grid input,
   .session-form .form-grid select {
     min-width: 0;
-    min-height: 38px;
-    padding: 6px 7px;
-    font-size: 0.82rem;
+    min-height: 29px;
+    padding: 3px 5px;
+    font-size: 0.72rem;
   }
 
   .session-form .form-grid label:nth-child(4) {
@@ -735,14 +974,18 @@ label select {
   }
 
   .session-form .form-grid label:nth-child(4) input {
-    font-size: 1rem;
+    font-size: 0.8rem;
+  }
+
+  .attempt-editor {
+    gap: 5px;
   }
 
   .tests-grid,
   .approach-grid {
     grid-template-columns: 1fr;
     gap: 0;
-    padding: 8px;
+    padding: 3px 5px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
     background: var(--soft);
@@ -767,16 +1010,16 @@ label select {
   }
 
   .tests-grid .attempt-card {
-    grid-template-columns: minmax(78px, 0.9fr) minmax(0, 1fr) minmax(70px, auto);
+    grid-template-columns: minmax(70px, 0.9fr) minmax(0, 1fr) minmax(56px, auto);
     align-items: center;
-    gap: 7px;
-    padding: 8px 0;
+    gap: 4px;
+    padding: 4px 0;
   }
 
   .tests-grid .attempt-card h3,
   .approach-grid .attempt-card h3 {
     text-align: center;
-    font-size: 0.86rem;
+    font-size: 0.72rem;
     line-height: 1.15;
   }
 
@@ -784,32 +1027,32 @@ label select {
   .tests-grid .attempt-card button,
   .approach-grid .attempt-card input,
   .approach-grid .attempt-card button {
-    min-height: 34px;
-    padding: 5px 7px;
-    font-size: 0.82rem;
+    min-height: 28px;
+    padding: 3px 5px;
+    font-size: 0.7rem;
   }
 
   .tests-grid .attempt-list,
   .approach-grid .attempt-list {
     grid-column: 1 / -1;
-    min-height: 18px;
+    min-height: 14px;
   }
 
   .approach-grid .attempt-card {
-    grid-template-columns: minmax(34px, 0.55fr) minmax(94px, 1.45fr) minmax(54px, 0.85fr) 34px;
+    grid-template-columns: 32px minmax(0, 1fr) 30px;
     align-items: center;
-    gap: 6px;
-    padding: 7px 0;
+    gap: 4px;
+    padding: 4px 0;
   }
 
   .approach-grid .attempt-card .mini-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 5px;
+    gap: 4px;
   }
 
   .approach-grid .attempt-card .small-button {
-    width: 34px;
-    min-width: 34px;
+    width: 30px;
+    min-width: 30px;
     padding: 0;
     font-size: 0;
     overflow: hidden;
@@ -824,7 +1067,7 @@ label select {
     display: grid;
     place-items: center;
     color: var(--ink);
-    font-size: 1.2rem;
+    font-size: 1rem;
   }
 
   .form-grid,
@@ -833,13 +1076,13 @@ label select {
   }
 
   .data-panel .panel-title-row {
-    gap: 10px;
+    gap: 7px;
   }
 
   .toolbar {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 8px;
+    gap: 5px;
     width: 100%;
   }
 
@@ -863,9 +1106,9 @@ label select {
   .toolbar select {
     min-width: 0;
     width: 100%;
-    min-height: 38px;
-    padding: 6px 8px;
-    font-size: 0.84rem;
+    min-height: 30px;
+    padding: 3px 5px;
+    font-size: 0.74rem;
   }
 
   .toolbar input {
@@ -882,20 +1125,20 @@ label select {
 
   .data-table th,
   .data-table td {
-    padding: 8px 5px;
-    font-size: 0.76rem;
+    padding: 4px 2px;
+    font-size: 0.66rem;
   }
 
   .compact-record-table th {
-    font-size: 0.68rem;
+    font-size: 0.62rem;
   }
 
   .tests-record-table th {
-    font-size: 0.56rem;
+    font-size: 0.52rem;
   }
 
   .compact-record-table td {
-    font-size: 0.78rem;
+    font-size: 0.7rem;
     white-space: nowrap;
   }
 
@@ -921,13 +1164,92 @@ label select {
   .longitud-record-table td:last-child,
   .altura-record-table th:last-child,
   .altura-record-table td:last-child {
-    width: 34px;
+    width: 46px;
   }
 
   .delete-button {
-    min-width: 26px;
-    min-height: 28px;
-    padding: 0;
+    min-width: 42px;
+    min-height: 22px;
+    padding: 0 3px;
+    font-size: 0.53rem;
+  }
+
+  .inline-plus {
+    min-width: 15px;
+    height: 15px;
+    margin-left: 2px;
+    padding: 0 3px;
+    font-size: 0.64rem;
+  }
+
+  .record-attempt-list {
+    gap: 1px;
+    margin-top: 2px;
+  }
+
+  .password-row {
+    grid-template-columns: minmax(0, 1fr) 32px;
+    gap: 4px;
+  }
+
+  .icon-button {
+    min-width: 32px;
+    min-height: 30px;
+  }
+
+  .icon-button svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .distance-config {
+    gap: 8px;
+  }
+
+  .distance-athlete {
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .distance-athlete h3 {
+    font-size: 0.95rem;
+  }
+
+  .distance-discipline {
+    gap: 5px;
+  }
+
+  .distance-discipline strong {
+    font-size: 0.78rem;
+  }
+
+  .distance-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  .distance-row {
+    grid-template-columns: 26px minmax(0, 1fr) minmax(0, 1fr);
+    gap: 3px;
+    font-size: 0.72rem;
+  }
+
+  .distance-row input {
+    min-height: 29px;
+    padding: 3px 5px;
+    font-size: 0.72rem;
+  }
+
+  .modal {
+    padding: 10px;
+  }
+
+  .modal-card {
+    padding: 10px;
+  }
+
+  .attempt-modal-row {
+    padding: 6px 8px;
   }
 
   .attempt-count {

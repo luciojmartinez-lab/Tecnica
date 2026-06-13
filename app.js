@@ -2,7 +2,7 @@
   "use strict";
 
   const STORAGE_KEY = "tecnica-state-v1";
-  const APP_VERSION = "001v7";
+  const APP_VERSION = "001v10";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -46,7 +46,8 @@
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
   let state = loadState();
-  let draft = { attempts: [], distances: {} };
+  let draft = { attempts: [] };
+  let expandedRecordCells = new Set();
   let toastTimer = null;
 
   document.addEventListener("DOMContentLoaded", init);
@@ -95,6 +96,8 @@
     state.sessions = Array.isArray(state.sessions) ? state.sessions : [];
     state.sourceNotes = Array.isArray(state.sourceNotes) ? state.sourceNotes : [];
     state.preferences = state.preferences || {};
+    state.settings = state.settings || {};
+    state.settings.approachDistances = state.settings.approachDistances || {};
     migrateLucioAthlete();
     state.sessions.forEach((session) => {
       session.attempts = Array.isArray(session.attempts) ? session.attempts : [];
@@ -108,7 +111,52 @@
         }
       });
     });
+    migrateApproachDistanceSettings();
     saveState(false);
+  }
+
+  function migrateApproachDistanceSettings(target = state) {
+    target.settings = target.settings || {};
+    target.settings.approachDistances = target.settings.approachDistances || {};
+    const oldGlobalDistances = {};
+    Object.keys(target.settings.approachDistances).forEach((key) => {
+      if (DISCIPLINES[key]) oldGlobalDistances[key] = target.settings.approachDistances[key];
+    });
+
+    (target.athletes || []).forEach((athlete) => {
+      target.settings.approachDistances[athlete.id] = target.settings.approachDistances[athlete.id] || {};
+      Object.values(DISCIPLINES)
+        .filter((discipline) => discipline.mode === "approach")
+        .forEach((discipline) => {
+          target.settings.approachDistances[athlete.id][discipline.id] = target.settings.approachDistances[athlete.id][discipline.id] || {};
+          discipline.approaches.forEach((approach) => {
+            const saved = target.settings.approachDistances[athlete.id][discipline.id][approach.id] || {};
+            const legacyGlobal = athlete.id === "lucio" ? oldGlobalDistances[discipline.id]?.[approach.id] || {} : {};
+            const migrated = findLegacyDistance(target, athlete.id, discipline.id, approach.id);
+            target.settings.approachDistances[athlete.id][discipline.id][approach.id] = {
+              feet: hasOwn(saved, "feet") ? saved.feet : migrated.feet ?? legacyGlobal.feet ?? null,
+              cm: hasOwn(saved, "cm") ? saved.cm : migrated.cm ?? legacyGlobal.cm ?? null,
+            };
+          });
+        });
+    });
+
+    Object.keys(oldGlobalDistances).forEach((key) => {
+      delete target.settings.approachDistances[key];
+    });
+  }
+
+  function findLegacyDistance(target, athleteId, disciplineId, approachId) {
+    const sessions = [...(target.sessions || [])]
+      .filter((session) => session.athleteId === athleteId && session.discipline === disciplineId)
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    for (const session of sessions) {
+      const sessionDistance = session.approachDistances?.[approachId];
+      if (sessionDistance && (sessionDistance.feet != null || sessionDistance.cm != null)) return sessionDistance;
+      const attempt = (session.attempts || []).find((item) => item.approachId === approachId && (item.distanceFeet != null || item.distanceCm != null));
+      if (attempt) return { feet: attempt.distanceFeet ?? null, cm: attempt.distanceCm ?? null };
+    }
+    return {};
   }
 
   function migrateLucioAthlete(target = state) {
@@ -158,7 +206,7 @@
 
   function bindForms() {
     $("#disciplineSelect").addEventListener("change", () => {
-      draft = { attempts: [], distances: {} };
+      draft = { attempts: [] };
       renderAttemptEditor();
     });
 
@@ -168,17 +216,17 @@
     });
 
     $("#clearDraftButton").addEventListener("click", () => {
-      draft = { attempts: [], distances: {} };
+      draft = { attempts: [] };
       renderAttemptEditor();
       toast("Borrador limpio");
     });
 
     $("#recordsBody").addEventListener("click", (event) => {
-      const button = event.target.closest("[data-delete-session], [data-delete-attempt], [data-delete-distance]");
+      const button = event.target.closest("[data-toggle-attempts], [data-delete-session], [data-delete-attempt]");
       if (!button) return;
+      if (button.dataset.toggleAttempts) toggleRecordAttempts(button.dataset.toggleAttempts);
       if (button.dataset.deleteSession) deleteSession(button.dataset.deleteSession);
       if (button.dataset.deleteAttempt) deleteAttempt(button.dataset.deleteAttempt);
-      if (button.dataset.deleteDistance) deleteDistance(button.dataset.deleteDistance, button.dataset.approach);
     });
 
     $("#athleteForm").addEventListener("submit", (event) => {
@@ -206,6 +254,16 @@
       athlete.active = !athlete.active;
       saveState();
       renderAll();
+    });
+
+    $("#distanceConfig").addEventListener("input", (event) => {
+      const input = event.target.closest("[data-distance-field]");
+      if (!input) return;
+      updateConfiguredDistance(input);
+    });
+
+    $("#attemptModal").addEventListener("click", (event) => {
+      if (event.target.closest("[data-close-modal]")) closeAttemptsModal();
     });
 
     ["sortSelect", "filterDiscipline", "filterAthlete", "filterText"].forEach((id) => {
@@ -241,6 +299,7 @@
       state.preferences.syncKey = $("#syncKeyInput").value;
       saveState(false);
     });
+    $("#toggleSyncKey").addEventListener("click", toggleSyncKeyVisibility);
     $("#syncEndpointInput").addEventListener("input", () => {
       state.preferences.syncEndpoint = $("#syncEndpointInput").value.trim() || "/api/sync";
       saveState(false);
@@ -256,6 +315,7 @@
     renderAttemptEditor();
     renderRecords();
     renderAthletes();
+    renderDistanceConfig();
     renderMetricPicker();
     renderSourceNotes();
     $("#syncKeyInput").value = state.preferences.syncKey || "";
@@ -299,7 +359,7 @@
     const lastDate = state.sessions.map((session) => session.date).sort().at(-1);
     const cards = [
       ["Atletas", String(state.athletes.filter((item) => item.active !== false).length), "Activos"],
-      ["Jornadas", String(state.sessions.length), "Sesiones guardadas"],
+      ["Jornadas", String(state.sessions.filter((session) => session.attempts.length).length), "Sesiones guardadas"],
       ["Intentos", String(attempts.length), "Saltos registrados"],
       ["Ultima", lastDate ? shortDate(lastDate) : "-", best ? `${best.metricLabel}: ${fmt(best.mark)} m` : "Sin marcas"],
     ];
@@ -343,15 +403,9 @@
   }
 
   function renderApproachCard(discipline, approach) {
-    const latest = latestDistance(discipline.id, approach.id);
-    const draftDistance = draft.distances[approach.id] || latest || {};
     return `
       <article class="attempt-card" data-approach="${approach.id}">
         <h3 title="${esc(approach.label)}">${esc(approach.short)}</h3>
-        <div class="mini-grid">
-          <input type="number" inputmode="decimal" step="0.1" min="0" placeholder="Pies" data-distance-feet value="${draftDistance.feet ?? ""}">
-          <input type="number" inputmode="decimal" step="1" min="0" placeholder="Cent." data-distance-cm value="${draftDistance.cm ?? ""}">
-        </div>
         <input type="number" inputmode="decimal" step="0.01" min="0" placeholder="Marca" data-mark>
         <button class="small-button" type="button" data-add-approach>Añadir</button>
         <div class="attempt-list" data-list="${approach.id}"></div>
@@ -385,22 +439,16 @@
     const discipline = DISCIPLINES[$("#disciplineSelect").value];
     const approach = discipline.approaches.find((item) => item.id === approachId);
     const card = $(`.attempt-card[data-approach="${approachId}"]`);
-    const feet = parseOptional($("[data-distance-feet]", card).value);
-    const cm = parseOptional($("[data-distance-cm]", card).value);
     const mark = parseMark($("[data-mark]", card).value);
-    draft.distances[approachId] = { feet, cm };
-    if (mark == null) {
-      renderDraftChips();
-      return toast("Distancia guardada para la jornada");
-    }
+    if (mark == null) return toast("Introduce una marca");
     draft.attempts.push({
       draftId: cryptoId(),
       eventId: `${discipline.id}_approach`,
       eventName: discipline.eventName,
       approachId,
       approachLabel: approach.label,
-      distanceFeet: feet,
-      distanceCm: cm,
+      distanceFeet: null,
+      distanceCm: null,
       mark,
       unit: discipline.unit,
     });
@@ -412,11 +460,7 @@
     $$(".attempt-list").forEach((list) => {
       const key = list.dataset.list;
       const attempts = draft.attempts.filter((attempt) => attempt.eventId === key || attempt.approachId === key);
-      const distance = draft.distances[key];
-      const distanceChip = distance && (distance.feet || distance.cm)
-        ? `<span class="chip">${distance.feet ? fmt(distance.feet) + " p" : ""}${distance.feet && distance.cm ? " / " : ""}${distance.cm ? fmt(distance.cm) + " cm" : ""}</span>`
-        : "";
-      list.innerHTML = distanceChip + attempts
+      list.innerHTML = attempts
         .map((attempt, index) => `
           <span class="chip">${index + 1}: ${fmt(attempt.mark)} ${attempt.unit}<button type="button" data-remove-draft="${attempt.draftId}" aria-label="Quitar">x</button></span>
         `)
@@ -435,23 +479,20 @@
     const date = $("#dateInput").value;
     const athleteId = $("#athleteSelect").value;
     const notes = $("#notesInput").value.trim();
-    collectVisibleDistances(discipline);
-    const hasDistance = Object.values(draft.distances).some((item) => item && (item.feet != null || item.cm != null));
-    if (!draft.attempts.length && !hasDistance) return toast("No hay datos para guardar");
+    if (!draft.attempts.length) return toast("No hay marcas para guardar");
 
     const counts = {};
     const attempts = draft.attempts.map((attempt) => {
       const key = attempt.approachId || attempt.eventId;
       counts[key] = (counts[key] || 0) + 1;
-      const distance = attempt.approachId ? draft.distances[attempt.approachId] || {} : {};
       return {
         id: cryptoId(),
         eventId: attempt.eventId,
         eventName: attempt.eventName,
         approachId: attempt.approachId,
         approachLabel: attempt.approachLabel,
-        distanceFeet: distance.feet ?? attempt.distanceFeet ?? null,
-        distanceCm: distance.cm ?? attempt.distanceCm ?? null,
+        distanceFeet: attempt.distanceFeet ?? null,
+        distanceCm: attempt.distanceCm ?? null,
         mark: attempt.mark,
         unit: attempt.unit,
         attempt: counts[key],
@@ -465,36 +506,15 @@
       discipline: discipline.id,
       notes,
       attempts,
-      approachDistances: clone(draft.distances),
+      approachDistances: {},
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
-    draft = { attempts: [], distances: {} };
+    draft = { attempts: [] };
     $("#notesInput").value = "";
     saveState();
     renderAll();
     toast("Jornada guardada");
-  }
-
-  function collectVisibleDistances(discipline) {
-    if (!discipline || discipline.mode !== "approach") return;
-    $$(".attempt-card[data-approach]").forEach((card) => {
-      const approachId = card.dataset.approach;
-      const feet = parseOptional($("[data-distance-feet]", card).value);
-      const cm = parseOptional($("[data-distance-cm]", card).value);
-      if (feet != null || cm != null) draft.distances[approachId] = { feet, cm };
-    });
-  }
-
-  function latestDistance(disciplineId, approachId) {
-    const sessions = state.sessions
-      .filter((session) => session.discipline === disciplineId)
-      .sort((a, b) => b.date.localeCompare(a.date));
-    for (const session of sessions) {
-      const distance = session.approachDistances && session.approachDistances[approachId];
-      if (distance && (distance.feet != null || distance.cm != null)) return distance;
-    }
-    return null;
   }
 
   function renderRecords() {
@@ -552,9 +572,6 @@
       .map((row) => {
         const bestKey = keyForBest(row);
         const isBest = row.mark != null && best.get(bestKey) === row.mark;
-        const deleteAttr = row.kind === "distance"
-          ? `data-delete-distance="${row.sessionId}" data-approach="${row.approachId}"`
-          : `data-delete-attempt="${row.attemptId}"`;
         return `
           <tr>
             <td>${formatDate(row.date)}</td>
@@ -563,8 +580,8 @@
             <td>${esc(row.metricLabel)}</td>
             <td>${row.mark == null ? '<span class="muted">-</span>' : `${fmt(row.mark)} ${row.unit}${isBest ? '<span class="best-badge">Mejor</span>' : ''}`}</td>
             <td>${row.distanceFeet == null ? "" : fmt(row.distanceFeet)}</td>
-            <td>${row.distanceCm == null ? "" : fmt(row.distanceCm)}</td>
-            <td><button class="small-button delete-button" type="button" ${deleteAttr}>-</button></td>
+            <td>${formatCm(row.distanceCm)}</td>
+            <td><button class="small-button delete-button" type="button" data-delete-attempt="${row.attemptId}">Eliminar</button></td>
           </tr>
         `;
       })
@@ -602,8 +619,8 @@
       .map((row) => `
         <tr>
           <td>${shortDate(row.date)}</td>
-          ${columns.map((column) => `<td>${formatRecordCell(row.values[column.key])}</td>`).join("")}
-          <td><button class="small-button delete-button" type="button" data-delete-session="${row.sessionId}" aria-label="Eliminar jornada">-</button></td>
+          ${columns.map((column) => `<td>${formatRecordCell(row, column.key)}</td>`).join("")}
+          <td><button class="small-button delete-button" type="button" data-delete-session="${row.sessionIds.join(",")}" aria-label="Eliminar jornada">Eliminar</button></td>
         </tr>
       `)
       .join("");
@@ -623,36 +640,112 @@
   }
 
   function groupedSessions(disciplineId) {
-    return state.sessions
+    const grouped = new Map();
+    state.sessions
       .filter((session) => session.discipline === disciplineId)
-      .map((session) => {
+      .forEach((session) => {
         const athlete = state.athletes.find((item) => item.id === session.athleteId);
-        const values = {};
+        const groupId = `${disciplineId}|${session.athleteId}|${session.date}`;
+        if (!grouped.has(groupId)) {
+          grouped.set(groupId, {
+            groupId,
+            sessionIds: [],
+            date: session.date,
+            athleteId: session.athleteId,
+            athleteName: athlete ? athlete.name : session.athleteId,
+            values: {},
+            search: {
+              date: session.date,
+              athlete: athlete ? athlete.name : session.athleteId,
+              notes: "",
+              values: "",
+            },
+          });
+        }
+        const group = grouped.get(groupId);
+        group.sessionIds.push(session.id);
+        group.search.notes += ` ${session.notes || ""}`;
         session.attempts.forEach((attempt) => {
           const key = attempt.approachId ? `${session.discipline}:${attempt.approachId}` : attempt.eventId;
-          values[key] = values[key] || { mark: null, unit: attempt.unit || "m", attempts: 0 };
-          values[key].attempts += 1;
-          if (values[key].mark == null || attempt.mark > values[key].mark) values[key].mark = attempt.mark;
+          group.values[key] = group.values[key] || { best: null, unit: attempt.unit || "m", attempts: [] };
+          group.values[key].attempts.push({
+            id: attempt.id,
+            sessionId: session.id,
+            mark: attempt.mark,
+            unit: attempt.unit || "m",
+            attempt: attempt.attempt,
+          });
+          if (group.values[key].best == null || attempt.mark > group.values[key].best) group.values[key].best = attempt.mark;
         });
-        return {
-          sessionId: session.id,
-          date: session.date,
-          athleteId: session.athleteId,
-          athleteName: athlete ? athlete.name : session.athleteId,
-          values,
-          search: {
-            date: session.date,
-            athlete: athlete ? athlete.name : session.athleteId,
-            notes: session.notes || "",
-            values: Object.values(values).map((value) => value.mark).join(" "),
-          },
-        };
       });
+    return Array.from(grouped.values()).map((group) => {
+      group.search.values = Object.values(group.values)
+        .flatMap((value) => value.attempts.map((attempt) => attempt.mark))
+        .join(" ");
+      return group;
+    });
   }
 
-  function formatRecordCell(value) {
-    if (!value || value.mark == null) return "";
-    return fmt(value.mark);
+  function formatRecordCell(row, columnKey) {
+    const value = row.values[columnKey];
+    if (!value || value.best == null) return "";
+    const cellId = recordCellId(row.groupId, columnKey);
+    const expanded = expandedRecordCells.has(cellId);
+    const attempts = [...value.attempts].sort((a, b) => b.mark - a.mark);
+    const more = attempts.length > 1
+      ? `<button class="inline-plus" type="button" data-toggle-attempts="${esc(cellId)}" aria-label="${expanded ? "Cerrar intentos" : "Ver intentos"}">${expanded ? "Cerrar" : "+"}</button>`
+      : "";
+    const details = expanded
+      ? `<div class="record-attempt-list">
+          ${attempts.map((attempt) => {
+            const isBest = attempt.mark === value.best;
+            return `<span class="${isBest ? "record-attempt is-best" : "record-attempt"}">${fmt(attempt.mark)}</span>`;
+          }).join("")}
+        </div>`
+      : "";
+    return `<div class="record-cell-content"><strong class="record-best">${fmt(value.best)}</strong>${more}${details}</div>`;
+  }
+
+  function recordCellId(groupId, columnKey) {
+    return `${groupId}||${columnKey}`;
+  }
+
+  function toggleRecordAttempts(cellId) {
+    if (expandedRecordCells.has(cellId)) {
+      expandedRecordCells.delete(cellId);
+    } else {
+      expandedRecordCells.add(cellId);
+    }
+    renderRecords();
+  }
+
+  function openAttemptsModal(groupId, columnKey) {
+    const [disciplineId] = groupId.split("|");
+    const discipline = DISCIPLINES[disciplineId];
+    const group = groupedSessions(disciplineId).find((item) => item.groupId === groupId);
+    const value = group?.values?.[columnKey];
+    if (!discipline || !group || !value) return;
+    const column = recordColumns(discipline).find((item) => item.key === columnKey);
+    const attempts = [...value.attempts].sort((a, b) => b.mark - a.mark);
+    $("#attemptModalTitle").textContent = `${column ? column.short : "Marca"} - ${formatDate(group.date)}`;
+    $("#attemptModalBody").innerHTML = `
+      <p class="modal-subtitle">${esc(group.athleteName)} · ${esc(discipline.label)}</p>
+      <div class="attempt-modal-list">
+        ${attempts.map((attempt, index) => {
+          const isBest = attempt.mark === value.best && index === 0;
+          return `<div class="attempt-modal-row ${isBest ? "is-best" : ""}">
+            <span>${index + 1}</span>
+            ${isBest ? `<strong>${fmt(attempt.mark)} ${esc(attempt.unit)}</strong>` : `<span>${fmt(attempt.mark)} ${esc(attempt.unit)}</span>`}
+          </div>`;
+        }).join("")}
+      </div>
+    `;
+    $("#attemptModal").hidden = false;
+  }
+
+  function closeAttemptsModal() {
+    $("#attemptModal").hidden = true;
+    $("#attemptModalBody").innerHTML = "";
   }
 
   function flattenAttempts() {
@@ -661,7 +754,7 @@
       const discipline = DISCIPLINES[session.discipline] || DISCIPLINES.tests;
       return session.attempts.map((attempt) => {
         const metricLabel = attempt.approachId ? `${attempt.eventName} ${attempt.approachLabel}` : attempt.eventName;
-        const distance = attempt.approachId ? session.approachDistances?.[attempt.approachId] || {} : {};
+        const distance = attempt.approachId ? getConfiguredDistance(session.athleteId, session.discipline, attempt.approachId, session) : {};
         return {
           kind: "attempt",
           sessionId: session.id,
@@ -676,8 +769,8 @@
           approachId: attempt.approachId,
           mark: attempt.mark,
           unit: attempt.unit || "m",
-          distanceFeet: distance.feet ?? attempt.distanceFeet ?? null,
-          distanceCm: distance.cm ?? attempt.distanceCm ?? null,
+          distanceFeet: distance.feet ?? null,
+          distanceCm: distance.cm ?? null,
           notes: session.notes || "",
         };
       });
@@ -685,35 +778,7 @@
   }
 
   function flattenRows() {
-    const rows = flattenAttempts();
-    state.sessions.forEach((session) => {
-      const discipline = DISCIPLINES[session.discipline];
-      if (!discipline || discipline.mode !== "approach") return;
-      const athlete = state.athletes.find((item) => item.id === session.athleteId);
-      Object.entries(session.approachDistances || {}).forEach(([approachId, distance]) => {
-        const hasAttempt = session.attempts.some((attempt) => attempt.approachId === approachId);
-        if (hasAttempt || (!distance.feet && !distance.cm)) return;
-        const approach = discipline.approaches.find((item) => item.id === approachId);
-        rows.push({
-          kind: "distance",
-          sessionId: session.id,
-          date: session.date,
-          athleteId: session.athleteId,
-          athleteName: athlete ? athlete.name : session.athleteId,
-          discipline: session.discipline,
-          disciplineLabel: discipline.label,
-          metricKey: `${session.discipline}:${approachId}`,
-          metricLabel: approach ? approach.label : approachId,
-          approachId,
-          mark: null,
-          unit: "m",
-          distanceFeet: distance.feet ?? null,
-          distanceCm: distance.cm ?? null,
-          notes: session.notes || "",
-        });
-      });
-    });
-    return rows;
+    return flattenAttempts();
   }
 
   function bestByDay() {
@@ -735,24 +800,15 @@
     state.sessions.forEach((session) => {
       session.attempts = session.attempts.filter((attempt) => attempt.id !== attemptId);
     });
-    state.sessions = state.sessions.filter((session) => session.attempts.length || Object.keys(session.approachDistances || {}).length);
+    state.sessions = state.sessions.filter((session) => session.attempts.length);
     saveState();
     renderAll();
   }
 
   function deleteSession(sessionId) {
     if (!confirm("Eliminar jornada completa?")) return;
-    state.sessions = state.sessions.filter((session) => session.id !== sessionId);
-    saveState();
-    renderAll();
-  }
-
-  function deleteDistance(sessionId, approachId) {
-    if (!confirm("Eliminar distancia?")) return;
-    const session = state.sessions.find((item) => item.id === sessionId);
-    if (!session || !session.approachDistances) return;
-    delete session.approachDistances[approachId];
-    state.sessions = state.sessions.filter((item) => item.attempts.length || Object.keys(item.approachDistances || {}).length);
+    const ids = new Set(String(sessionId).split(","));
+    state.sessions = state.sessions.filter((session) => !ids.has(session.id));
     saveState();
     renderAll();
   }
@@ -766,6 +822,57 @@
         </div>
       `)
       .join("");
+  }
+
+  function renderDistanceConfig() {
+    const disciplines = Object.values(DISCIPLINES).filter((discipline) => discipline.mode === "approach");
+    $("#distanceConfig").innerHTML = state.athletes
+      .map((athlete) => `
+        <section class="distance-athlete">
+          <h3>${esc(athlete.name)}</h3>
+          ${disciplines.map((discipline) => `
+            <div class="distance-discipline">
+              <strong>${esc(discipline.label)}</strong>
+              <div class="distance-grid">
+                ${discipline.approaches.map((approach) => {
+                  const distance = getConfiguredDistance(athlete.id, discipline.id, approach.id);
+                  return `
+                    <label class="distance-row">
+                      <span>${esc(approach.short)}</span>
+                      <input data-distance-field="feet" data-athlete="${esc(athlete.id)}" data-discipline="${discipline.id}" data-approach="${approach.id}" inputmode="decimal" value="${distance.feet == null ? "" : fmt(distance.feet)}" placeholder="pies">
+                      <input data-distance-field="cm" data-athlete="${esc(athlete.id)}" data-discipline="${discipline.id}" data-approach="${approach.id}" inputmode="decimal" value="${formatCm(distance.cm)}" placeholder="cm">
+                    </label>
+                  `;
+                }).join("")}
+              </div>
+            </div>
+          `).join("")}
+        </section>
+      `)
+      .join("");
+  }
+
+  function updateConfiguredDistance(input) {
+    const athleteId = input.dataset.athlete;
+    const disciplineId = input.dataset.discipline;
+    const approachId = input.dataset.approach;
+    const field = input.dataset.distanceField;
+    state.settings.approachDistances[athleteId] = state.settings.approachDistances[athleteId] || {};
+    state.settings.approachDistances[athleteId][disciplineId] = state.settings.approachDistances[athleteId][disciplineId] || {};
+    const distance = state.settings.approachDistances[athleteId][disciplineId][approachId] || { feet: null, cm: null };
+    distance[field] = field === "cm" ? parseCmInput(input.value) : parseOptional(input.value);
+    state.settings.approachDistances[athleteId][disciplineId][approachId] = distance;
+    saveState();
+  }
+
+  function getConfiguredDistance(athleteId, disciplineId, approachId, session = null) {
+    const configured = state.settings?.approachDistances?.[athleteId]?.[disciplineId]?.[approachId] || {};
+    const legacy = session?.approachDistances?.[approachId] || {};
+    const attemptLegacy = session?.attempts?.find((attempt) => attempt.approachId === approachId && (attempt.distanceFeet != null || attempt.distanceCm != null));
+    return {
+      feet: hasOwn(configured, "feet") ? configured.feet : legacy.feet ?? attemptLegacy?.distanceFeet ?? null,
+      cm: hasOwn(configured, "cm") ? configured.cm : legacy.cm ?? attemptLegacy?.distanceCm ?? null,
+    };
   }
 
   function renderMetricPicker() {
@@ -834,7 +941,7 @@
     const left = 58;
     const right = 24;
     const top = 28;
-    const bottom = 54;
+    const bottom = 86;
     const plotW = width - left - right;
     const plotH = height - top - bottom;
     const xAt = (index) => left + (dates.length === 1 ? plotW / 2 : (plotW * index) / (dates.length - 1));
@@ -858,11 +965,15 @@
       ctx.fillText(fmt(value), left - 8, y);
     }
 
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
     dates.forEach((date, index) => {
-      if (dates.length > 8 && index % Math.ceil(dates.length / 8) !== 0) return;
-      ctx.fillText(shortDate(date), xAt(index), height - bottom + 18);
+      if (dates.length > 12 && index % Math.ceil(dates.length / 12) !== 0) return;
+      ctx.save();
+      ctx.translate(xAt(index), height - bottom + 12);
+      ctx.rotate(Math.PI / 2);
+      ctx.fillText(shortDate(date), 0, 0);
+      ctx.restore();
     });
 
     metrics.forEach((metric, metricIndex) => {
@@ -973,6 +1084,15 @@
     return key;
   }
 
+  function toggleSyncKeyVisibility() {
+    const input = $("#syncKeyInput");
+    const button = $("#toggleSyncKey");
+    const visible = input.type === "text";
+    input.type = visible ? "password" : "text";
+    button.setAttribute("aria-label", visible ? "Mostrar clave" : "Ocultar clave");
+    button.title = visible ? "Mostrar clave" : "Ocultar clave";
+  }
+
   function getSyncEndpoint() {
     return ($("#syncEndpointInput").value || "/api/sync").trim();
   }
@@ -985,11 +1105,13 @@
     next.sessions = Array.isArray(next.sessions) ? next.sessions : [];
     next.preferences = next.preferences || {};
     migrateLucioAthlete(next);
+    migrateApproachDistanceSettings(next);
     return next;
   }
 
   function exportBackup() {
     download(`tecnica-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(state, null, 2), "application/json");
+    toast("Backup descargado");
   }
 
   function exportCsv() {
@@ -1003,10 +1125,11 @@
       row.mark ?? "",
       row.unit ?? "",
       row.distanceFeet ?? "",
-      row.distanceCm ?? "",
+      formatCm(row.distanceCm),
       row.notes ?? "",
     ])].map((row) => row.map(csvCell).join(",")).join("\n");
     download(`tecnica-${new Date().toISOString().slice(0, 10)}.csv`, csv, "text/csv;charset=utf-8");
+    toast("CSV descargado");
   }
 
   function importBackup(event) {
@@ -1080,9 +1203,26 @@
     return Number.isFinite(parsed) ? parsed : null;
   }
 
+  function parseCmInput(value) {
+    const text = String(value ?? "").trim();
+    if (!text) return null;
+    const normalized = text.replace(",", ".");
+    const parsed = Number(normalized);
+    if (!Number.isFinite(parsed)) return null;
+    return /[,.]/.test(text) ? Math.round(parsed * 100) : Math.round(parsed);
+  }
+
   function fmt(value) {
     if (value == null || value === "") return "";
     return Number(value).toLocaleString("es-ES", { maximumFractionDigits: 2 });
+  }
+
+  function formatCm(value) {
+    if (value == null || value === "") return "";
+    return (Number(value) / 100).toLocaleString("es-ES", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
   }
 
   function formatDate(date) {
@@ -1103,6 +1243,10 @@
 
   function slug(value) {
     return normalize(value).replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "atleta";
+  }
+
+  function hasOwn(object, key) {
+    return Object.prototype.hasOwnProperty.call(object || {}, key);
   }
 
   function esc(value) {
