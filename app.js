@@ -2,7 +2,8 @@
   "use strict";
 
   const STORAGE_KEY = "tecnica-state-v1";
-  const APP_VERSION = "001v14";
+  const DRAFT_STORAGE_KEY = "tecnica-draft-v1";
+  const APP_VERSION = "001v15";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -46,7 +47,7 @@
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
   let state = loadState();
-  let draft = { attempts: [] };
+  let draft = loadDraft();
   let expandedRecordCells = new Set();
   let toastTimer = null;
 
@@ -67,6 +68,9 @@
     registerServiceWorker();
     $("#dateInput").value = new Date().toISOString().slice(0, 10);
     renderAll();
+    restoreDraftForm();
+    renderAttemptEditor();
+    if (draft.attempts.length) toast("Hay marcas sin guardar");
     updateSyncStatus();
     window.addEventListener("online", updateSyncStatus);
     window.addEventListener("offline", updateSyncStatus);
@@ -89,6 +93,22 @@
     return seed;
   }
 
+  function loadDraft() {
+    const empty = { attempts: [], form: {} };
+    const saved = localStorage.getItem(DRAFT_STORAGE_KEY);
+    if (!saved) return empty;
+    try {
+      const parsed = JSON.parse(saved);
+      return {
+        attempts: Array.isArray(parsed.attempts) ? parsed.attempts : [],
+        form: parsed.form || {},
+      };
+    } catch (error) {
+      console.warn(error);
+      return empty;
+    }
+  }
+
   function migrateState() {
     state.schemaVersion = 1;
     state.appVersion = APP_VERSION;
@@ -98,7 +118,6 @@
     state.preferences = state.preferences || {};
     state.settings = state.settings || {};
     state.settings.approachDistances = state.settings.approachDistances || {};
-    migrateLucioAthlete();
     mergeDuplicateAthletes();
     state.sessions.forEach((session) => {
       session.attempts = Array.isArray(session.attempts) ? session.attempts : [];
@@ -108,6 +127,7 @@
           session.approachDistances[attempt.approachId] = {
             feet: attempt.distanceFeet ?? null,
             cm: attempt.distanceCm ?? null,
+            meters: legacyDistanceMeters(attempt.distanceCm),
           };
         }
       });
@@ -134,14 +154,19 @@
             const saved = target.settings.approachDistances[athlete.id][discipline.id][approach.id] || {};
             const legacyGlobal = athlete.id === "lucio" ? oldGlobalDistances[discipline.id]?.[approach.id] || {} : {};
             const migrated = findLegacyDistance(target, athlete.id, discipline.id, approach.id);
+            const legacyMeters = hasOwn(saved, "cm")
+              ? saved.cm
+              : (hasOwn(migrated, "meters") ? migrated.meters : migrated.cm ?? legacyGlobal.meters ?? legacyGlobal.cm ?? null);
             const distance = {
               feet: hasOwn(saved, "feet") ? saved.feet : migrated.feet ?? legacyGlobal.feet ?? null,
-              cm: hasOwn(saved, "cm") ? saved.cm : migrated.cm ?? legacyGlobal.cm ?? null,
+              meters: hasOwn(saved, "meters") ? saved.meters : legacyDistanceMeters(legacyMeters),
+              cm: null,
             };
             if (discipline.id === "altura") {
               distance.horizontal = hasOwn(saved, "horizontal") ? saved.horizontal : (saved.feet ?? migrated.feet ?? legacyGlobal.feet ?? null);
               distance.vertical = hasOwn(saved, "vertical") ? saved.vertical : (saved.cm ?? migrated.cm ?? legacyGlobal.cm ?? null);
               distance.feet = null;
+              distance.meters = null;
               distance.cm = null;
             }
             target.settings.approachDistances[athlete.id][discipline.id][approach.id] = distance;
@@ -160,37 +185,11 @@
       .sort((a, b) => String(b.date).localeCompare(String(a.date)));
     for (const session of sessions) {
       const sessionDistance = session.approachDistances?.[approachId];
-      if (sessionDistance && (sessionDistance.feet != null || sessionDistance.cm != null)) return sessionDistance;
+      if (sessionDistance && (sessionDistance.feet != null || sessionDistance.meters != null || sessionDistance.cm != null)) return sessionDistance;
       const attempt = (session.attempts || []).find((item) => item.approachId === approachId && (item.distanceFeet != null || item.distanceCm != null));
-      if (attempt) return { feet: attempt.distanceFeet ?? null, cm: attempt.distanceCm ?? null };
+      if (attempt) return { feet: attempt.distanceFeet ?? null, cm: attempt.distanceCm ?? null, meters: legacyDistanceMeters(attempt.distanceCm) };
     }
     return {};
-  }
-
-  function migrateLucioAthlete(target = state) {
-    const oldAthlete = target.athletes.find((athlete) => athlete.id === "miquel");
-    const lucioAthlete = target.athletes.find((athlete) => athlete.id === "lucio");
-
-    if (oldAthlete && lucioAthlete && oldAthlete !== lucioAthlete) {
-      target.sessions.forEach((session) => {
-        if (session.athleteId === "miquel") session.athleteId = "lucio";
-      });
-      target.athletes = target.athletes.filter((athlete) => athlete.id !== "miquel");
-      return;
-    }
-
-    if (oldAthlete) {
-      oldAthlete.id = "lucio";
-      oldAthlete.name = "Lucio";
-      target.sessions.forEach((session) => {
-        if (session.athleteId === "miquel") session.athleteId = "lucio";
-      });
-      if (target.preferences.chartAthlete === "miquel") target.preferences.chartAthlete = "lucio";
-    }
-
-    target.athletes.forEach((athlete) => {
-      if (athlete.name === "Miquel") athlete.name = "Lucio";
-    });
   }
 
   function mergeDuplicateAthletes(target = state) {
@@ -247,7 +246,8 @@
         const incoming = remove[disciplineId][approachId] || {};
         keep[disciplineId][approachId] = {
           feet: hasOwn(saved, "feet") && saved.feet != null ? saved.feet : incoming.feet ?? null,
-          cm: hasOwn(saved, "cm") && saved.cm != null ? saved.cm : incoming.cm ?? null,
+          meters: hasOwn(saved, "meters") && saved.meters != null ? saved.meters : incoming.meters ?? legacyDistanceMeters(incoming.cm) ?? null,
+          cm: null,
           horizontal: hasOwn(saved, "horizontal") && saved.horizontal != null ? saved.horizontal : incoming.horizontal ?? null,
           vertical: hasOwn(saved, "vertical") && saved.vertical != null ? saved.vertical : incoming.vertical ?? null,
         };
@@ -262,10 +262,48 @@
     updateSyncStatus();
   }
 
+  function saveDraft() {
+    localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+  }
+
+  function clearDraft() {
+    draft = { attempts: [], form: {} };
+    localStorage.removeItem(DRAFT_STORAGE_KEY);
+  }
+
+  function updateDraftForm() {
+    draft.form = {
+      athleteId: $("#athleteSelect").value,
+      disciplineId: $("#disciplineSelect").value,
+      date: $("#dateInput").value,
+      notes: $("#notesInput").value,
+    };
+    saveDraft();
+  }
+
+  function restoreDraftForm() {
+    const form = draft.form || {};
+    if (form.athleteId && state.athletes.some((athlete) => athlete.id === form.athleteId)) $("#athleteSelect").value = form.athleteId;
+    if (form.disciplineId && DISCIPLINES[form.disciplineId]) $("#disciplineSelect").value = form.disciplineId;
+    if (form.date) $("#dateInput").value = form.date;
+    if (form.notes) $("#notesInput").value = form.notes;
+  }
+
+  function hasUnsavedDraft() {
+    return draft.attempts.length > 0;
+  }
+
+  function confirmLeaveDraft() {
+    if (!hasUnsavedDraft()) return true;
+    return confirm("Tienes marcas sin guardar. Salir sin guardarlas?");
+  }
+
   function bindNavigation() {
     $$(".tab-button").forEach((button) => {
       button.addEventListener("click", () => {
         const tab = button.dataset.tab;
+        const currentTab = $(".tab-button.is-active")?.dataset.tab;
+        if (currentTab === "datos" && tab !== "datos" && !confirmLeaveDraft()) return;
         $$(".tab-button").forEach((item) => item.classList.toggle("is-active", item === button));
         $$(".view").forEach((view) => view.classList.toggle("is-active", view.id === `view-${tab}`));
         state.preferences.tab = tab;
@@ -277,7 +315,24 @@
 
   function bindForms() {
     $("#disciplineSelect").addEventListener("change", () => {
+      updateDraftForm();
       renderAttemptEditor();
+    });
+
+    ["athleteSelect", "dateInput", "notesInput"].forEach((id) => {
+      $("#" + id).addEventListener("input", updateDraftForm);
+      $("#" + id).addEventListener("change", updateDraftForm);
+    });
+
+    window.addEventListener("beforeunload", (event) => {
+      saveDraft();
+      if (!hasUnsavedDraft()) return;
+      event.preventDefault();
+      event.returnValue = "";
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") saveDraft();
     });
 
     $("#sessionForm").addEventListener("submit", (event) => {
@@ -286,7 +341,7 @@
     });
 
     $("#clearDraftButton").addEventListener("click", () => {
-      draft = { attempts: [] };
+      clearDraft();
       renderAttemptEditor();
       toast("Borrador limpio");
     });
@@ -522,6 +577,7 @@
       unit: metric.unit,
     });
     input.value = "";
+    updateDraftForm();
     renderDraftChips();
   }
 
@@ -546,6 +602,7 @@
       unit: discipline.unit,
     });
     $("[data-mark]", card).value = "";
+    updateDraftForm();
     renderDraftChips();
   }
 
@@ -562,6 +619,7 @@
     $$("[data-remove-draft]").forEach((button) => {
       button.addEventListener("click", () => {
         draft.attempts = draft.attempts.filter((attempt) => attempt.draftId !== button.dataset.removeDraft);
+        saveDraft();
         renderDraftChips();
       });
     });
@@ -621,7 +679,7 @@
         updatedAt: new Date().toISOString(),
       });
     });
-    draft = { attempts: [] };
+    clearDraft();
     $("#notesInput").value = "";
     saveState();
     renderAll();
@@ -659,7 +717,7 @@
           <th>Columna</th>
           <th>Marca</th>
           <th>Pies</th>
-          <th>Cent.</th>
+          <th>Metros</th>
           <th></th>
         </tr>
       `;
@@ -675,7 +733,7 @@
         <th>Columna</th>
         <th>Marca</th>
         <th>Pies</th>
-        <th>Cent.</th>
+        <th>Metros</th>
         <th></th>
       </tr>
     `;
@@ -691,7 +749,7 @@
             <td>${esc(row.metricLabel)}</td>
             <td>${row.mark == null ? '<span class="muted">-</span>' : `${fmt(row.mark)} ${row.unit}${isBest ? '<span class="best-badge">Mejor</span>' : ''}`}</td>
             <td>${row.distanceFeet == null ? "" : fmt(row.distanceFeet)}</td>
-            <td>${formatCm(row.distanceCm)}</td>
+            <td>${row.distanceMeters == null ? "" : fmt(row.distanceMeters)}</td>
             <td><button class="small-button delete-button" type="button" data-delete-attempt="${row.attemptId}">Eliminar</button></td>
           </tr>
         `;
@@ -804,7 +862,7 @@
     const expanded = expandedRecordCells.has(cellId);
     const attempts = [...value.attempts].sort((a, b) => b.mark - a.mark);
     const more = attempts.length > 1
-      ? `<button class="inline-plus" type="button" data-toggle-attempts="${esc(cellId)}" aria-label="${expanded ? "Cerrar intentos" : "Ver intentos"}">${expanded ? "Cerrar" : "+"}</button>`
+      ? `<button class="inline-plus" type="button" data-toggle-attempts="${esc(cellId)}" aria-label="${expanded ? "Cerrar intentos" : "Ver intentos"}">${expanded ? "-" : "+"}</button>`
       : "";
     const details = expanded
       ? `<div class="record-attempt-list">
@@ -881,7 +939,7 @@
           mark: attempt.mark,
           unit: attempt.unit || "m",
           distanceFeet: distance.feet ?? null,
-          distanceCm: distance.cm ?? null,
+          distanceMeters: distance.meters ?? null,
           notes: session.notes || "",
         };
       });
@@ -1016,7 +1074,7 @@
       <label class="distance-row">
         <span>${esc(approach.short)}</span>
         <input data-distance-field="feet" data-athlete="${esc(athlete.id)}" data-discipline="${discipline.id}" data-approach="${approach.id}" inputmode="decimal" value="${distance.feet == null ? "" : fmt(distance.feet)}" placeholder="pies">
-        <input data-distance-field="cm" data-athlete="${esc(athlete.id)}" data-discipline="${discipline.id}" data-approach="${approach.id}" inputmode="decimal" value="${formatCm(distance.cm)}" placeholder="cm">
+        <input data-distance-field="meters" data-athlete="${esc(athlete.id)}" data-discipline="${discipline.id}" data-approach="${approach.id}" inputmode="decimal" value="${distance.meters == null ? "" : fmt(distance.meters)}" placeholder="m">
       </label>
     `;
   }
@@ -1038,10 +1096,12 @@
     const field = input.dataset.distanceField;
     state.settings.approachDistances[athleteId] = state.settings.approachDistances[athleteId] || {};
     state.settings.approachDistances[athleteId][disciplineId] = state.settings.approachDistances[athleteId][disciplineId] || {};
-    const distance = state.settings.approachDistances[athleteId][disciplineId][approachId] || { feet: null, cm: null };
-    distance[field] = field === "cm" ? parseCmInput(input.value) : parseOptional(input.value);
+    const distance = state.settings.approachDistances[athleteId][disciplineId][approachId] || { feet: null, meters: null, cm: null };
+    distance[field] = parseOptional(input.value);
+    if (field === "meters") distance.cm = null;
     if (disciplineId === "altura") {
       distance.feet = null;
+      distance.meters = null;
       distance.cm = null;
     }
     state.settings.approachDistances[athleteId][disciplineId][approachId] = distance;
@@ -1053,20 +1113,24 @@
     const legacy = session?.approachDistances?.[approachId] || {};
     const attemptLegacy = session?.attempts?.find((attempt) => attempt.approachId === approachId && (attempt.distanceFeet != null || attempt.distanceCm != null));
     const feet = hasOwn(configured, "feet") ? configured.feet : legacy.feet ?? attemptLegacy?.distanceFeet ?? null;
-    const cm = hasOwn(configured, "cm") ? configured.cm : legacy.cm ?? attemptLegacy?.distanceCm ?? null;
+    const meters = hasOwn(configured, "meters")
+      ? configured.meters
+      : legacy.meters ?? legacyDistanceMeters(configured.cm ?? legacy.cm ?? attemptLegacy?.distanceCm);
     if (disciplineId === "altura") {
       return {
         feet: null,
         cm: null,
+        meters: null,
         horizontal: hasOwn(configured, "horizontal") ? configured.horizontal : (configured.feet ?? legacy.feet ?? attemptLegacy?.distanceFeet ?? null),
         vertical: hasOwn(configured, "vertical") ? configured.vertical : (configured.cm ?? legacy.cm ?? attemptLegacy?.distanceCm ?? null),
       };
     }
     return {
       feet,
-      cm,
+      cm: null,
+      meters,
       horizontal: feet,
-      vertical: cm,
+      vertical: meters,
     };
   }
 
@@ -1416,7 +1480,6 @@
     next.athletes = Array.isArray(next.athletes) ? next.athletes : [];
     next.sessions = Array.isArray(next.sessions) ? next.sessions : [];
     next.preferences = next.preferences || {};
-    migrateLucioAthlete(next);
     mergeDuplicateAthletes(next);
     migrateApproachDistanceSettings(next);
     return next;
@@ -1429,7 +1492,7 @@
 
   function exportCsv() {
     const rows = flattenRows();
-    const header = ["fecha", "atleta", "especialidad", "columna", "marca", "unidad", "pies", "centimetros", "notas"];
+    const header = ["fecha", "atleta", "especialidad", "columna", "marca", "unidad", "pies", "metros", "notas"];
     const csv = [header, ...rows.map((row) => [
       row.date,
       row.athleteName,
@@ -1438,7 +1501,7 @@
       row.mark ?? "",
       row.unit ?? "",
       row.distanceFeet ?? "",
-      formatCm(row.distanceCm),
+      row.distanceMeters ?? "",
       row.notes ?? "",
     ])].map((row) => row.map(csvCell).join(",")).join("\n");
     download(`tecnica-${new Date().toISOString().slice(0, 10)}.csv`, csv, "text/csv;charset=utf-8");
@@ -1516,26 +1579,16 @@
     return Number.isFinite(parsed) ? parsed : null;
   }
 
-  function parseCmInput(value) {
-    const text = String(value ?? "").trim();
-    if (!text) return null;
-    const normalized = text.replace(",", ".");
-    const parsed = Number(normalized);
-    if (!Number.isFinite(parsed)) return null;
-    return /[,.]/.test(text) ? Math.round(parsed * 100) : Math.round(parsed);
+  function legacyDistanceMeters(value) {
+    if (value == null || value === "") return null;
+    const number = Number(value);
+    if (!Number.isFinite(number)) return null;
+    return Math.abs(number) > 80 ? number / 100 : number;
   }
 
   function fmt(value) {
     if (value == null || value === "") return "";
     return Number(value).toLocaleString("es-ES", { maximumFractionDigits: 2 });
-  }
-
-  function formatCm(value) {
-    if (value == null || value === "") return "";
-    return (Number(value) / 100).toLocaleString("es-ES", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
   }
 
   function formatDate(date) {

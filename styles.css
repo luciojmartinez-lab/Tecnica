@@ -1227,6 +1227,13 @@ label select {
     font-size: 0.64rem;
   }
 
+  .record-cell-content > .inline-plus {
+    position: static;
+    display: flex;
+    margin: 2px auto 0;
+    transform: none;
+  }
+
   .record-attempt-list {
     gap: 1px;
     margin-top: 2px;
