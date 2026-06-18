@@ -808,6 +808,55 @@ label select {
   margin-top: 12px;
 }
 
+.auto-backup-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.auto-backup-title h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.auto-backup-list {
+  display: grid;
+  margin-top: 8px;
+}
+
+.auto-backup-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.auto-backup-info {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.auto-backup-info strong {
+  font-size: 0.86rem;
+}
+
+.auto-backup-info span {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.auto-backup-actions {
+  display: flex;
+  gap: 5px;
+}
+
 .source-notes {
   display: grid;
   gap: 12px;
@@ -1322,6 +1371,44 @@ label select {
     min-height: 26px;
     padding: 2px 5px;
     font-size: 0.68rem;
+  }
+
+  .auto-backup-title {
+    gap: 5px;
+    margin-top: 10px;
+    padding-top: 8px;
+  }
+
+  .auto-backup-title h3 {
+    font-size: 0.82rem;
+  }
+
+  .auto-backup-list {
+    margin-top: 4px;
+  }
+
+  .auto-backup-row {
+    gap: 4px;
+    padding: 5px 0;
+  }
+
+  .auto-backup-info strong {
+    font-size: 0.68rem;
+  }
+
+  .auto-backup-info span {
+    font-size: 0.56rem;
+    line-height: 1.15;
+  }
+
+  .auto-backup-actions {
+    gap: 3px;
+  }
+
+  .auto-backup-actions .small-button {
+    min-height: 24px;
+    padding: 2px 4px;
+    font-size: 0.58rem;
   }
 
   .metric-picker {

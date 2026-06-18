@@ -3,7 +3,10 @@
 
   const STORAGE_KEY = "tecnica-state-v1";
   const DRAFT_STORAGE_KEY = "tecnica-draft-v1";
-  const APP_VERSION = "001v15";
+  const AUTO_BACKUP_KEY = "tecnica-auto-backups-v1";
+  const MAX_AUTO_BACKUPS = 12;
+  const AUTO_BACKUP_WINDOW_MS = 2 * 60 * 1000;
+  const APP_VERSION = "001v16";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -48,6 +51,7 @@
 
   let state = loadState();
   let draft = loadDraft();
+  let autoBackups = loadAutoBackups();
   let expandedRecordCells = new Set();
   let toastTimer = null;
 
@@ -70,6 +74,7 @@
     renderAll();
     restoreDraftForm();
     renderAttemptEditor();
+    createAutoBackup("Inicio");
     if (draft.attempts.length) toast("Hay marcas sin guardar");
     updateSyncStatus();
     window.addEventListener("online", updateSyncStatus);
@@ -106,6 +111,18 @@
     } catch (error) {
       console.warn(error);
       return empty;
+    }
+  }
+
+  function loadAutoBackups() {
+    const saved = localStorage.getItem(AUTO_BACKUP_KEY);
+    if (!saved) return [];
+    try {
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed.filter((backup) => backup?.data).slice(0, MAX_AUTO_BACKUPS) : [];
+    } catch (error) {
+      console.warn(error);
+      return [];
     }
   }
 
@@ -259,7 +276,69 @@
   function saveState(touch = true) {
     if (touch) state.updatedAt = new Date().toISOString();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    if (touch) createAutoBackup("Guardado automatico");
     updateSyncStatus();
+  }
+
+  function createAutoBackup(reason = "Guardado automatico", forceNew = false, source = state, shouldRender = true) {
+    if (!source || !Array.isArray(source.sessions) || !Array.isArray(source.athletes)) return null;
+    const data = clone(source);
+    const signature = backupSignature(data);
+    const latest = autoBackups[0];
+    if (!forceNew && latest?.signature === signature) return latest;
+
+    const backup = {
+      id: cryptoId(),
+      createdAt: new Date().toISOString(),
+      reason,
+      signature,
+      sessions: data.sessions.length,
+      attempts: data.sessions.reduce((total, session) => total + (session.attempts || []).length, 0),
+      data,
+    };
+    const recent = latest && Date.now() - Date.parse(latest.createdAt || 0) < AUTO_BACKUP_WINDOW_MS;
+    if (!forceNew && recent && latest.reason === "Guardado automatico") autoBackups[0] = backup;
+    else autoBackups.unshift(backup);
+    autoBackups = autoBackups.slice(0, MAX_AUTO_BACKUPS);
+    persistAutoBackups();
+    if (shouldRender) renderAutoBackups();
+    return backup;
+  }
+
+  function backupSignature(data) {
+    const text = JSON.stringify({
+      athletes: data.athletes || [],
+      sessions: data.sessions || [],
+      settings: data.settings || {},
+    });
+    let hash = 2166136261;
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return `${text.length}:${(hash >>> 0).toString(16)}`;
+  }
+
+  function persistAutoBackups() {
+    try {
+      localStorage.setItem(AUTO_BACKUP_KEY, JSON.stringify(autoBackups));
+    } catch (error) {
+      console.warn(error);
+      while (autoBackups.length > 1) {
+        autoBackups.pop();
+        try {
+          localStorage.setItem(AUTO_BACKUP_KEY, JSON.stringify(autoBackups));
+          return;
+        } catch (retryError) {
+          console.warn(retryError);
+        }
+      }
+      try {
+        localStorage.setItem(AUTO_BACKUP_KEY, JSON.stringify(autoBackups));
+      } catch (finalError) {
+        console.warn(finalError);
+      }
+    }
   }
 
   function saveDraft() {
@@ -326,13 +405,20 @@
 
     window.addEventListener("beforeunload", (event) => {
       saveDraft();
+      createAutoBackup("Cierre o segundo plano", false, state, false);
       if (!hasUnsavedDraft()) return;
       event.preventDefault();
       event.returnValue = "";
     });
 
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "hidden") saveDraft();
+      if (document.visibilityState !== "hidden") return;
+      saveDraft();
+      createAutoBackup("Cierre o segundo plano", false, state, false);
+    });
+    window.addEventListener("pagehide", () => {
+      saveDraft();
+      createAutoBackup("Cierre o segundo plano", false, state, false);
     });
 
     $("#sessionForm").addEventListener("submit", (event) => {
@@ -435,6 +521,16 @@
     $("#importButton").addEventListener("click", () => $("#importFile").click());
     $("#importFile").addEventListener("change", importBackup);
     $("#resetButton").addEventListener("click", resetSeed);
+    $("#createAutoBackupButton").addEventListener("click", () => {
+      createAutoBackup("Copia manual", true);
+      toast("Copia automatica creada");
+    });
+    $("#autoBackupList").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-restore-auto-backup], [data-download-auto-backup]");
+      if (!button) return;
+      if (button.dataset.restoreAutoBackup) restoreAutoBackup(button.dataset.restoreAutoBackup);
+      if (button.dataset.downloadAutoBackup) downloadAutoBackup(button.dataset.downloadAutoBackup);
+    });
 
     $("#syncKeyInput").addEventListener("input", () => {
       state.preferences.syncKey = $("#syncKeyInput").value;
@@ -446,7 +542,7 @@
       saveState(false);
     });
     $("#syncButton").addEventListener("click", syncSmart);
-    $("#pushButton").addEventListener("click", pushRemote);
+    $("#pushButton").addEventListener("click", () => pushRemote());
     $("#pullButton").addEventListener("click", pullRemote);
   }
 
@@ -457,6 +553,7 @@
     renderRecords();
     renderAthletes();
     renderDistanceConfig();
+    renderAutoBackups();
     renderMetricPicker();
     renderSourceNotes();
     $("#syncKeyInput").value = state.preferences.syncKey || "";
@@ -966,6 +1063,7 @@
 
   function deleteAttempt(attemptId) {
     if (!confirm("Eliminar intento?")) return;
+    createAutoBackup("Antes de eliminar", true);
     state.sessions.forEach((session) => {
       session.attempts = session.attempts.filter((attempt) => attempt.id !== attemptId);
     });
@@ -976,6 +1074,7 @@
 
   function deleteSession(sessionId) {
     if (!confirm("Eliminar jornada completa?")) return;
+    createAutoBackup("Antes de eliminar", true);
     const ids = new Set(String(sessionId).split(","));
     state.sessions = state.sessions.filter((session) => !ids.has(session.id));
     saveState();
@@ -996,6 +1095,61 @@
       .join("");
   }
 
+  function renderAutoBackups() {
+    const root = $("#autoBackupList");
+    if (!root) return;
+    if (!autoBackups.length) {
+      root.innerHTML = `<p class="muted">Sin copias automaticas</p>`;
+      return;
+    }
+    root.innerHTML = autoBackups.map((backup) => `
+      <div class="auto-backup-row">
+        <div class="auto-backup-info">
+          <strong>${formatBackupDateTime(backup.createdAt)}</strong>
+          <span>${esc(backup.reason || "Copia automatica")} · ${backup.sessions ?? 0} jornadas · ${backup.attempts ?? 0} intentos</span>
+        </div>
+        <div class="auto-backup-actions">
+          <button class="small-button" type="button" data-download-auto-backup="${esc(backup.id)}">Backup</button>
+          <button class="small-button" type="button" data-restore-auto-backup="${esc(backup.id)}">Restaurar</button>
+        </div>
+      </div>
+    `).join("");
+  }
+
+  function restoreAutoBackup(backupId) {
+    const backup = autoBackups.find((item) => item.id === backupId);
+    if (!backup || !confirm(`Restaurar la copia del ${formatBackupDateTime(backup.createdAt)}?`)) return;
+    const syncKey = state.preferences?.syncKey || "";
+    const syncEndpoint = state.preferences?.syncEndpoint || "/api/sync";
+    createAutoBackup("Antes de restaurar", true);
+    state = normalizeIncoming(backup.data);
+    state.preferences.syncKey = syncKey;
+    state.preferences.syncEndpoint = syncEndpoint;
+    saveState();
+    renderAll();
+    toast("Copia restaurada");
+  }
+
+  function downloadAutoBackup(backupId) {
+    const backup = autoBackups.find((item) => item.id === backupId);
+    if (!backup) return;
+    const stamp = String(backup.createdAt || "").replace(/[:.]/g, "-");
+    download(`tecnica-auto-${stamp}.json`, JSON.stringify(backup.data, null, 2), "application/json");
+    toast("Backup descargado");
+  }
+
+  function formatBackupDateTime(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleString("es-ES", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
   function deleteAthlete(athleteId) {
     const athlete = state.athletes.find((item) => item.id === athleteId);
     if (!athlete) return;
@@ -1008,6 +1162,7 @@
         ? `Eliminar ${athlete.name} y sus ${sessionsCount} jornadas?`
         : `Eliminar ${athlete.name}?`;
     if (!confirm(message)) return;
+    createAutoBackup("Antes de eliminar", true);
 
     if (target) {
       state.sessions.forEach((session) => {
@@ -1398,25 +1553,32 @@
     const localTime = Date.parse(state.updatedAt || 0);
     const remoteTime = Date.parse(remote.updatedAt || remote.savedAt || 0);
     if (remote.data && remoteTime > localTime) {
+      createAutoBackup("Antes de sincronizar", true);
       state = normalizeIncoming(remote.data);
       saveState(false);
+      createAutoBackup("Datos descargados", true);
       renderAll();
       toast("Datos descargados");
       return;
     }
-    await pushRemote();
+    await pushRemote(remote);
   }
 
   async function pullRemote() {
     const remote = await fetchRemote();
     if (!remote || !remote.data) return;
+    createAutoBackup("Antes de descargar", true);
     state = normalizeIncoming(remote.data);
     saveState(false);
+    createAutoBackup("Datos descargados", true);
     renderAll();
     toast("Datos descargados");
   }
 
-  async function pushRemote() {
+  async function pushRemote(remoteSnapshot = null) {
+    const remote = remoteSnapshot || await fetchRemote();
+    if (!remote) return;
+    if (remote.data) createAutoBackup("Servidor antes de subir", true, remote.data);
     const key = getSyncKey();
     if (!key) return;
     const endpoint = getSyncEndpoint();
@@ -1515,6 +1677,7 @@
     reader.onload = () => {
       try {
         const incoming = JSON.parse(reader.result);
+        createAutoBackup("Antes de importar", true);
         state = normalizeIncoming(incoming);
         saveState();
         renderAll();
@@ -1531,6 +1694,7 @@
 
   function resetSeed() {
     if (!confirm("Restaurar los datos iniciales?")) return;
+    createAutoBackup("Antes de restaurar seed", true);
     state = clone(window.TECNICA_SEED);
     state.preferences = {};
     state.updatedAt = new Date().toISOString();
