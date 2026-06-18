@@ -4,9 +4,10 @@
   const STORAGE_KEY = "tecnica-state-v1";
   const DRAFT_STORAGE_KEY = "tecnica-draft-v1";
   const AUTO_BACKUP_KEY = "tecnica-auto-backups-v1";
-  const MAX_AUTO_BACKUPS = 12;
+  const SYNC_META_KEY = "tecnica-sync-meta-v1";
+  const MAX_AUTO_BACKUPS = 5;
   const AUTO_BACKUP_WINDOW_MS = 2 * 60 * 1000;
-  const APP_VERSION = "001v16";
+  const APP_VERSION = "001v17";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -52,6 +53,8 @@
   let state = loadState();
   let draft = loadDraft();
   let autoBackups = loadAutoBackups();
+  let syncMeta = loadSyncMeta();
+  let activeSyncComparison = null;
   let expandedRecordCells = new Set();
   let toastTimer = null;
 
@@ -80,6 +83,7 @@
     window.addEventListener("online", updateSyncStatus);
     window.addEventListener("offline", updateSyncStatus);
     window.addEventListener("resize", debounce(drawChart, 150));
+    window.setTimeout(checkRemoteOnStart, 250);
   }
 
   function loadState() {
@@ -123,6 +127,18 @@
     } catch (error) {
       console.warn(error);
       return [];
+    }
+  }
+
+  function loadSyncMeta() {
+    const saved = localStorage.getItem(SYNC_META_KEY);
+    if (!saved) return {};
+    try {
+      const parsed = JSON.parse(saved);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (error) {
+      console.warn(error);
+      return {};
     }
   }
 
@@ -306,17 +322,53 @@
   }
 
   function backupSignature(data) {
-    const text = JSON.stringify({
-      athletes: data.athletes || [],
-      sessions: data.sessions || [],
-      settings: data.settings || {},
-    });
+    return sharedDataHash(sharedData(data));
+  }
+
+  function sharedData(source = state) {
+    return {
+      schemaVersion: source.schemaVersion || 1,
+      sourceWorkbook: source.sourceWorkbook || "",
+      importedAt: source.importedAt || null,
+      sourceNotes: Array.isArray(source.sourceNotes) ? source.sourceNotes : [],
+      athletes: Array.isArray(source.athletes) ? source.athletes : [],
+      sessions: Array.isArray(source.sessions) ? source.sessions : [],
+      settings: source.settings && typeof source.settings === "object" ? source.settings : {},
+      updatedAt: source.updatedAt || new Date().toISOString(),
+    };
+  }
+
+  function stableStringify(value) {
+    if (value == null || typeof value !== "object") return JSON.stringify(value);
+    if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+    const keys = Object.keys(value).sort();
+    return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
+  }
+
+  function sharedDataHash(data) {
+    const text = stableStringify(data);
     let hash = 2166136261;
     for (let index = 0; index < text.length; index += 1) {
       hash ^= text.charCodeAt(index);
       hash = Math.imul(hash, 16777619);
     }
     return `${text.length}:${(hash >>> 0).toString(16)}`;
+  }
+
+  function saveSyncMeta(remote, localSignature = sharedDataHash(sharedData())) {
+    syncMeta = {
+      revision: remote?.revision || null,
+      localSignature,
+      syncedAt: new Date().toISOString(),
+      remoteUpdatedAt: remote?.updatedAt || remote?.savedAt || null,
+    };
+    localStorage.setItem(SYNC_META_KEY, JSON.stringify(syncMeta));
+  }
+
+  function resetSyncMeta() {
+    syncMeta = {};
+    activeSyncComparison = null;
+    localStorage.removeItem(SYNC_META_KEY);
   }
 
   function persistAutoBackups() {
@@ -485,6 +537,11 @@
     $("#attemptModal").addEventListener("click", (event) => {
       if (event.target.closest("[data-close-modal]")) closeAttemptsModal();
     });
+    $("#syncModal").addEventListener("click", (event) => {
+      if (event.target.closest("[data-close-sync-modal]")) closeSyncModal();
+    });
+    $("#syncDownloadButton").addEventListener("click", downloadRemoteVersion);
+    $("#syncUploadButton").addEventListener("click", uploadLocalVersion);
 
     ["sortSelect", "filterDiscipline", "filterAthlete", "filterText"].forEach((id) => {
       $("#" + id).addEventListener("input", () => {
@@ -534,16 +591,16 @@
 
     $("#syncKeyInput").addEventListener("input", () => {
       state.preferences.syncKey = $("#syncKeyInput").value;
+      resetSyncMeta();
       saveState(false);
     });
     $("#toggleSyncKey").addEventListener("click", toggleSyncKeyVisibility);
     $("#syncEndpointInput").addEventListener("input", () => {
       state.preferences.syncEndpoint = $("#syncEndpointInput").value.trim() || "/api/sync";
+      resetSyncMeta();
       saveState(false);
     });
-    $("#syncButton").addEventListener("click", syncSmart);
-    $("#pushButton").addEventListener("click", () => pushRemote());
-    $("#pullButton").addEventListener("click", pullRemote);
+    $("#syncButton").addEventListener("click", () => showSyncDialog(false));
   }
 
   function renderAll() {
@@ -1119,12 +1176,8 @@
   function restoreAutoBackup(backupId) {
     const backup = autoBackups.find((item) => item.id === backupId);
     if (!backup || !confirm(`Restaurar la copia del ${formatBackupDateTime(backup.createdAt)}?`)) return;
-    const syncKey = state.preferences?.syncKey || "";
-    const syncEndpoint = state.preferences?.syncEndpoint || "/api/sync";
     createAutoBackup("Antes de restaurar", true);
     state = normalizeIncoming(backup.data);
-    state.preferences.syncKey = syncKey;
-    state.preferences.syncEndpoint = syncEndpoint;
     saveState();
     renderAll();
     toast("Copia restaurada");
@@ -1547,78 +1600,246 @@
     ctx.fillText(message, width / 2, height / 2);
   }
 
-  async function syncSmart() {
-    const remote = await fetchRemote();
-    if (!remote) return;
-    const localTime = Date.parse(state.updatedAt || 0);
-    const remoteTime = Date.parse(remote.updatedAt || remote.savedAt || 0);
-    if (remote.data && remoteTime > localTime) {
-      createAutoBackup("Antes de sincronizar", true);
-      state = normalizeIncoming(remote.data);
-      saveState(false);
-      createAutoBackup("Datos descargados", true);
-      renderAll();
-      toast("Datos descargados");
-      return;
+  async function checkRemoteOnStart() {
+    if (!navigator.onLine || !getSyncKey(true)) return;
+    const comparison = await compareSyncVersions(true);
+    if (!comparison) return;
+    const remoteIsNewer = Date.parse(comparison.remote?.updatedAt || 0) > Date.parse(comparison.local.updatedAt || 0);
+    if (comparison.kind === "remote" || (comparison.kind === "conflict" && remoteIsNewer)) {
+      openSyncModal(comparison, true);
     }
-    await pushRemote(remote);
   }
 
-  async function pullRemote() {
-    const remote = await fetchRemote();
-    if (!remote || !remote.data) return;
-    createAutoBackup("Antes de descargar", true);
+  async function showSyncDialog(silent = false) {
+    if (!navigator.onLine) return toast("Sin conexion");
+    const comparison = await compareSyncVersions(silent);
+    if (comparison) openSyncModal(comparison, false);
+  }
+
+  async function compareSyncVersions(silent = false) {
+    if (!silent) toast("Consultando nube");
+    const remote = await fetchRemoteMetadata(silent);
+    if (!remote) return null;
+    const localData = sharedData();
+    const local = {
+      data: localData,
+      dataHash: sharedDataHash(localData),
+      updatedAt: localData.updatedAt,
+      summary: {
+        athletes: localData.athletes.length,
+        sessions: localData.sessions.length,
+        attempts: localData.sessions.reduce((total, session) => total + (session.attempts || []).length, 0),
+      },
+    };
+
+    let kind = "conflict";
+    let hasCommonBase = Boolean(syncMeta.revision && syncMeta.localSignature);
+    if (!remote.exists) {
+      kind = "local";
+      hasCommonBase = false;
+    } else if (remote.dataHash === local.dataHash) {
+      kind = "equal";
+      saveSyncMeta(remote, local.dataHash);
+      hasCommonBase = true;
+    } else if (hasCommonBase) {
+      const localChanged = local.dataHash !== syncMeta.localSignature;
+      const remoteChanged = remote.revision !== syncMeta.revision;
+      if (localChanged && remoteChanged) kind = "conflict";
+      else if (remoteChanged) kind = "remote";
+      else if (localChanged) kind = "local";
+    } else {
+      const localTime = Date.parse(local.updatedAt || 0);
+      const remoteTime = Date.parse(remote.updatedAt || remote.savedAt || 0);
+      if (remoteTime > localTime) kind = "remote";
+      else if (localTime > remoteTime) kind = "local";
+    }
+
+    const comparison = { kind, hasCommonBase, local, remote };
+    activeSyncComparison = comparison;
+    updateSyncStatus(comparison);
+    return comparison;
+  }
+
+  function openSyncModal(comparison, startup = false) {
+    activeSyncComparison = comparison;
+    const { kind, local, remote, hasCommonBase } = comparison;
+    const messages = {
+      equal: "Las dos versiones ya estan sincronizadas.",
+      remote: startup ? "La nube es mas reciente. Quieres actualizar este dispositivo?" : "Recomendacion: descargar la version de la nube.",
+      local: remote.exists ? "Recomendacion: subir la version de este dispositivo." : "No hay datos en la nube. Recomendacion: subir este dispositivo.",
+      conflict: "Ambas versiones se han modificado. Elige cual quieres conservar.",
+    };
+    $("#syncModalBody").innerHTML = `
+      <div class="sync-version-list">
+        <div class="sync-version-row">
+          <span>Nube</span>
+          <strong>${remote.exists ? formatSyncDate(remote.updatedAt || remote.savedAt) : "Sin datos"}</strong>
+          <small>${remote.exists ? syncSummary(remote.summary) : ""}</small>
+        </div>
+        <div class="sync-version-row">
+          <span>Este dispositivo</span>
+          <strong>${formatSyncDate(local.updatedAt)}</strong>
+          <small>${syncSummary(local.summary)}</small>
+        </div>
+      </div>
+      <p class="sync-recommendation ${kind === "conflict" ? "is-warning" : ""}">${messages[kind]}</p>
+      ${!hasCommonBase && remote.exists && kind !== "equal"
+        ? `<p class="sync-note">Primera comparacion sin revision comun. Revisa las fechas antes de elegir.</p>`
+        : ""}
+    `;
+    const downloadButton = $("#syncDownloadButton");
+    const uploadButton = $("#syncUploadButton");
+    downloadButton.hidden = !remote.exists || kind === "equal";
+    uploadButton.hidden = kind === "equal";
+    downloadButton.className = kind === "remote" ? "primary-button" : "ghost-button";
+    uploadButton.className = kind === "local" ? "primary-button" : "ghost-button";
+    $("#syncModal").hidden = false;
+  }
+
+  function closeSyncModal() {
+    $("#syncModal").hidden = true;
+    setSyncButtonsDisabled(false);
+    activeSyncComparison = null;
+  }
+
+  async function downloadRemoteVersion() {
+    const expectedRevision = activeSyncComparison?.remote?.revision;
+    if (!expectedRevision) return;
+    setSyncButtonsDisabled(true);
+    const remote = await fetchRemoteData();
+    if (!remote) return setSyncButtonsDisabled(false);
+    if (remote.revision !== expectedRevision) {
+      setSyncButtonsDisabled(false);
+      toast("La nube ha cambiado. Vuelve a elegir");
+      return showSyncDialog(true);
+    }
+
+    createAutoBackup("antes-de-sincronizar", true);
     state = normalizeIncoming(remote.data);
     saveState(false);
-    createAutoBackup("Datos descargados", true);
+    const localSignature = sharedDataHash(sharedData());
+    saveSyncMeta(remote, localSignature);
+    createAutoBackup("despues-de-sincronizar-2", true);
     renderAll();
-    toast("Datos descargados");
+    closeSyncModal();
+    toast("Nube descargada");
   }
 
-  async function pushRemote(remoteSnapshot = null) {
-    const remote = remoteSnapshot || await fetchRemote();
-    if (!remote) return;
-    if (remote.data) createAutoBackup("Servidor antes de subir", true, remote.data);
-    const key = getSyncKey();
-    if (!key) return;
-    const endpoint = getSyncEndpoint();
-    try {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-sync-key": key },
-        body: JSON.stringify({ data: state, updatedAt: state.updatedAt }),
-      });
-      if (!response.ok) throw new Error(await response.text());
-      const payload = await response.json();
-      state.preferences.lastSyncAt = payload.savedAt || new Date().toISOString();
-      saveState(false);
-      updateSyncStatus();
-      toast("Datos subidos");
-    } catch (error) {
-      console.error(error);
-      toast("No se pudo subir");
+  async function uploadLocalVersion() {
+    const comparison = activeSyncComparison;
+    if (!comparison) return;
+    setSyncButtonsDisabled(true);
+    let expectedRevision = comparison.remote.exists ? comparison.remote.revision : null;
+    if (comparison.remote.exists) {
+      const remote = await fetchRemoteData();
+      if (!remote) return setSyncButtonsDisabled(false);
+      if (remote.revision !== expectedRevision) {
+        setSyncButtonsDisabled(false);
+        toast("La nube ha cambiado. Vuelve a elegir");
+        return showSyncDialog(true);
+      }
+      createAutoBackup("nube-antes-de-subir", true, remote.data);
     }
+    createAutoBackup("antes-de-sincronizar", true);
+
+    const result = await postRemoteData(expectedRevision);
+    if (!result) return setSyncButtonsDisabled(false);
+    if (result.conflict) {
+      setSyncButtonsDisabled(false);
+      toast("Conflicto: la nube ha cambiado");
+      const refreshed = await compareSyncVersions(true);
+      if (refreshed) openSyncModal(refreshed, false);
+      return;
+    }
+
+    const localSignature = sharedDataHash(sharedData());
+    saveSyncMeta(result, localSignature);
+    state.preferences.lastSyncAt = result.savedAt || new Date().toISOString();
+    saveState(false);
+    createAutoBackup("despues-de-sincronizar-2", true);
+    renderAll();
+    closeSyncModal();
+    toast("Datos subidos");
   }
 
-  async function fetchRemote() {
-    const key = getSyncKey();
+  function setSyncButtonsDisabled(disabled) {
+    $("#syncDownloadButton").disabled = disabled;
+    $("#syncUploadButton").disabled = disabled;
+  }
+
+  async function fetchRemoteMetadata(silent = false) {
+    const key = getSyncKey(silent);
     if (!key) return null;
     const endpoint = getSyncEndpoint();
+    const separator = endpoint.includes("?") ? "&" : "?";
     try {
-      const response = await fetch(endpoint, { headers: { "x-sync-key": key } });
-      if (response.status === 404) return { data: null };
+      const response = await fetch(`${endpoint}${separator}meta=1`, { headers: { "x-sync-key": key } });
+      if (response.status === 404) return { exists: false };
       if (!response.ok) throw new Error(await response.text());
       return await response.json();
     } catch (error) {
       console.error(error);
-      toast("No se pudo sincronizar");
+      if (!silent) toast("No se pudo consultar la nube");
       return null;
     }
   }
 
-  function getSyncKey() {
+  async function fetchRemoteData() {
+    const key = getSyncKey();
+    if (!key) return null;
+    try {
+      const response = await fetch(getSyncEndpoint(), { headers: { "x-sync-key": key } });
+      if (response.status === 404) return { exists: false, data: null };
+      if (!response.ok) throw new Error(await response.text());
+      return await response.json();
+    } catch (error) {
+      console.error(error);
+      toast("No se pudo descargar la nube");
+      return null;
+    }
+  }
+
+  async function postRemoteData(expectedRevision) {
+    const key = getSyncKey();
+    if (!key) return null;
+    try {
+      const data = sharedData();
+      const response = await fetch(getSyncEndpoint(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-sync-key": key },
+        body: JSON.stringify({ data, updatedAt: data.updatedAt, expectedRevision }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (response.status === 409) return { conflict: true, ...payload };
+      if (!response.ok) throw new Error(JSON.stringify(payload));
+      return payload;
+    } catch (error) {
+      console.error(error);
+      toast("No se pudo subir");
+      return null;
+    }
+  }
+
+  function syncSummary(summary = {}) {
+    return `${summary.sessions || 0} jornadas · ${summary.attempts || 0} intentos`;
+  }
+
+  function formatSyncDate(value) {
+    if (!value) return "Sin fecha";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "Sin fecha";
+    return date.toLocaleString("es-ES", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
+  function getSyncKey(silent = false) {
     const key = $("#syncKeyInput").value.trim();
-    if (!key) toast("Falta la clave");
+    if (!key && !silent) toast("Falta la clave");
     return key;
   }
 
@@ -1637,7 +1858,7 @@
 
   function normalizeIncoming(incoming) {
     const next = clone(incoming);
-    next.preferences = { ...(state.preferences || {}), ...(next.preferences || {}) };
+    next.preferences = { ...(next.preferences || {}), ...(state.preferences || {}) };
     next.updatedAt = next.updatedAt || new Date().toISOString();
     next.athletes = Array.isArray(next.athletes) ? next.athletes : [];
     next.sessions = Array.isArray(next.sessions) ? next.sessions : [];
@@ -1695,8 +1916,9 @@
   function resetSeed() {
     if (!confirm("Restaurar los datos iniciales?")) return;
     createAutoBackup("Antes de restaurar seed", true);
+    const localPreferences = clone(state.preferences || {});
     state = clone(window.TECNICA_SEED);
-    state.preferences = {};
+    state.preferences = localPreferences;
     state.updatedAt = new Date().toISOString();
     migrateState();
     renderAll();
@@ -1714,11 +1936,24 @@
       .join("");
   }
 
-  function updateSyncStatus() {
+  function updateSyncStatus(comparison = null) {
     const status = $("#syncStatus");
     if (!status) return;
     if (!navigator.onLine) {
       status.textContent = "Offline";
+      return;
+    }
+    if (comparison) {
+      status.textContent = {
+        equal: "Al dia",
+        remote: "Nube nueva",
+        local: "Local nuevo",
+        conflict: "Conflicto",
+      }[comparison.kind] || "Local";
+      return;
+    }
+    if (syncMeta.localSignature && sharedDataHash(sharedData()) !== syncMeta.localSignature) {
+      status.textContent = "Local nuevo";
       return;
     }
     const last = state.preferences?.lastSyncAt;

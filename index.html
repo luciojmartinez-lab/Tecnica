@@ -8,7 +8,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="icons/icon.svg">
-    <link rel="stylesheet" href="styles.css?v=001v16">
+    <link rel="stylesheet" href="styles.css?v=001v17">
   </head>
   <body>
     <div class="app-shell">
@@ -21,7 +21,7 @@
           </div>
         </div>
         <div class="header-stack">
-          <span class="version-pill">001v16</span>
+          <span class="version-pill">001v17</span>
           <span class="sync-pill" id="syncStatus">Local</span>
         </div>
       </header>
@@ -165,8 +165,6 @@
             </div>
             <div class="form-actions">
               <button class="primary-button" type="button" id="syncButton">Sincronizar</button>
-              <button class="ghost-button" type="button" id="pushButton">Subir</button>
-              <button class="ghost-button" type="button" id="pullButton">Descargar</button>
             </div>
           </section>
 
@@ -196,6 +194,22 @@
       </main>
     </div>
 
+    <div class="modal" id="syncModal" hidden>
+      <div class="modal-backdrop" data-close-sync-modal></div>
+      <section class="modal-card sync-modal-card" role="dialog" aria-modal="true" aria-labelledby="syncModalTitle">
+        <div class="modal-title-row">
+          <h2 id="syncModalTitle">Sincronizar</h2>
+          <button class="small-button delete-button" type="button" data-close-sync-modal aria-label="Cerrar">Cerrar</button>
+        </div>
+        <div id="syncModalBody" class="sync-modal-body"></div>
+        <div class="sync-modal-actions">
+          <button class="primary-button" type="button" id="syncDownloadButton">Usar nube</button>
+          <button class="ghost-button" type="button" id="syncUploadButton">Usar local</button>
+          <button class="ghost-button" type="button" data-close-sync-modal>Cancelar</button>
+        </div>
+      </section>
+    </div>
+
     <div class="modal" id="attemptModal" hidden>
       <div class="modal-backdrop" data-close-modal></div>
       <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="attemptModalTitle">
@@ -209,7 +223,7 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="seed-data.js?v=001v16"></script>
-    <script src="app.js?v=001v16"></script>
+    <script src="seed-data.js?v=001v17"></script>
+    <script src="app.js?v=001v17"></script>
   </body>
 </html>

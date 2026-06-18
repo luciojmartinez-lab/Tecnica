@@ -764,6 +764,66 @@ label select {
   margin-bottom: 8px;
 }
 
+.sync-modal-card {
+  width: min(94vw, 520px);
+}
+
+.sync-modal-body {
+  display: grid;
+  gap: 10px;
+}
+
+.sync-version-list {
+  display: grid;
+  border-top: 1px solid var(--line);
+}
+
+.sync-version-row {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 3px 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.sync-version-row > span {
+  grid-row: 1 / span 2;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.sync-version-row strong {
+  font-size: 0.92rem;
+}
+
+.sync-version-row small {
+  color: var(--muted);
+}
+
+.sync-recommendation {
+  padding: 9px 10px;
+  border-left: 4px solid var(--blue-600);
+  background: var(--soft-blue);
+  font-weight: 760;
+}
+
+.sync-recommendation.is-warning {
+  border-left-color: var(--amber);
+  background: #fff7e6;
+}
+
+.sync-note {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.sync-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 12px;
+}
+
 .modal-subtitle {
   color: var(--muted);
   font-weight: 700;
@@ -1433,6 +1493,40 @@ label select {
 
   .modal-card {
     padding: 10px;
+  }
+
+  .sync-modal-body {
+    gap: 6px;
+  }
+
+  .sync-version-row {
+    grid-template-columns: 82px minmax(0, 1fr);
+    gap: 2px 6px;
+    padding: 6px 0;
+  }
+
+  .sync-version-row > span,
+  .sync-version-row strong {
+    font-size: 0.7rem;
+  }
+
+  .sync-version-row small,
+  .sync-note {
+    font-size: 0.58rem;
+  }
+
+  .sync-recommendation {
+    padding: 6px 7px;
+    font-size: 0.7rem;
+  }
+
+  .sync-modal-actions {
+    gap: 4px;
+    margin-top: 7px;
+  }
+
+  .sync-modal-actions > button {
+    flex: 1 1 auto;
   }
 
   .attempt-modal-row {

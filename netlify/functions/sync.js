@@ -25,6 +25,58 @@ async function readBody(req) {
   }
 }
 
+function sharedData(data = {}) {
+  return {
+    schemaVersion: data.schemaVersion || 1,
+    sourceWorkbook: data.sourceWorkbook || "",
+    importedAt: data.importedAt || null,
+    sourceNotes: Array.isArray(data.sourceNotes) ? data.sourceNotes : [],
+    athletes: Array.isArray(data.athletes) ? data.athletes : [],
+    sessions: Array.isArray(data.sessions) ? data.sessions : [],
+    settings: data.settings && typeof data.settings === "object" ? data.settings : {},
+    updatedAt: data.updatedAt || new Date().toISOString(),
+  };
+}
+
+function stableStringify(value) {
+  if (value == null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  const keys = Object.keys(value).sort();
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
+}
+
+function dataHash(data) {
+  const text = stableStringify(sharedData(data));
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${text.length}:${(hash >>> 0).toString(16)}`;
+}
+
+function summary(data) {
+  return {
+    athletes: data.athletes.length,
+    sessions: data.sessions.length,
+    attempts: data.sessions.reduce((total, session) => total + (session.attempts || []).length, 0),
+  };
+}
+
+function metadata(saved) {
+  if (!saved?.data) return { exists: false };
+  const data = sharedData(saved.data);
+  const hash = saved.dataHash || dataHash(data);
+  return {
+    exists: true,
+    revision: saved.revision || `legacy-${hash}`,
+    savedAt: saved.savedAt || saved.updatedAt || data.updatedAt,
+    updatedAt: saved.updatedAt || data.updatedAt,
+    dataHash: hash,
+    summary: saved.summary || summary(data),
+  };
+}
+
 export default async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
 
@@ -35,25 +87,47 @@ export default async (req) => {
 
   const store = getStore({ name: "tecnica-sync", consistency: "strong" });
   const blobKey = `datasets/${await hashKey(key)}.json`;
+  const saved = await store.get(blobKey, { type: "json" });
+  const current = metadata(saved);
 
   if (req.method === "GET") {
-    const saved = await store.get(blobKey, { type: "json" });
-    if (!saved) return json({ data: null }, 404);
-    return json(saved);
+    if (!current.exists) return json(current, 404);
+    if (url.searchParams.get("meta") === "1") return json(current);
+    return json({ ...current, data: sharedData(saved.data) });
   }
 
   if (req.method === "POST") {
     if (!body.data || typeof body.data !== "object") return json({ error: "invalid_payload" }, 400);
+    const expectedRevision = body.expectedRevision ?? null;
+    if (current.exists && expectedRevision !== current.revision) {
+      return json({ error: "revision_conflict", ...current }, 409);
+    }
+    if (!current.exists && expectedRevision) {
+      return json({ error: "revision_conflict", ...current }, 409);
+    }
+
+    const data = sharedData(body.data);
+    data.updatedAt = body.updatedAt || data.updatedAt || new Date().toISOString();
     const payload = {
-      version: 1,
+      version: 2,
+      revision: crypto.randomUUID(),
+      parentRevision: current.exists ? current.revision : null,
       savedAt: new Date().toISOString(),
-      updatedAt: body.updatedAt || body.data.updatedAt || new Date().toISOString(),
-      data: body.data,
+      updatedAt: data.updatedAt,
+      dataHash: dataHash(data),
+      summary: summary(data),
+      data,
     };
     await store.setJSON(blobKey, payload, {
-      metadata: { updatedAt: payload.updatedAt, app: "tecnica" },
+      metadata: {
+        revision: payload.revision,
+        updatedAt: payload.updatedAt,
+        savedAt: payload.savedAt,
+        dataHash: payload.dataHash,
+        app: "tecnica",
+      },
     });
-    return json({ ok: true, savedAt: payload.savedAt, updatedAt: payload.updatedAt });
+    return json({ ok: true, ...metadata(payload) });
   }
 
   return json({ error: "method_not_allowed" }, 405);
