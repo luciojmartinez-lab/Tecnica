@@ -8,7 +8,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="icons/icon.svg">
-    <link rel="stylesheet" href="styles.css?v=001v19">
+    <link rel="stylesheet" href="styles.css?v=001v20">
   </head>
   <body>
     <div class="app-shell">
@@ -21,7 +21,7 @@
           </div>
         </div>
         <div class="header-stack">
-          <span class="version-pill">001v19</span>
+          <span class="version-pill">001v20</span>
           <span class="sync-pill" id="syncStatus">Local</span>
         </div>
       </header>
@@ -85,6 +85,7 @@
                 <select id="filterDiscipline" aria-label="Especialidad"></select>
                 <select id="filterAthlete" aria-label="Atleta"></select>
                 <input id="filterText" type="search" placeholder="Filtrar" aria-label="Filtrar">
+                <select id="filterSeason" aria-label="Temporada"></select>
               </div>
             </div>
             <div class="table-wrap">
@@ -118,6 +119,7 @@
                   <option value="date">Fecha</option>
                   <option value="approach">Zancadas</option>
                 </select>
+                <select id="chartSeason" aria-label="Temporada del grafico"></select>
               </div>
             </div>
             <div class="metric-picker" id="metricPicker"></div>
@@ -141,6 +143,18 @@
           <section class="panel">
             <h2>Distancias</h2>
             <div id="distanceConfig" class="distance-config"></div>
+          </section>
+
+          <section class="panel">
+            <h2>Temporadas</h2>
+            <label>Mes de inicio
+              <select id="seasonStartMonth">
+                <option value="1">Enero</option><option value="2">Febrero</option><option value="3">Marzo</option>
+                <option value="4">Abril</option><option value="5">Mayo</option><option value="6">Junio</option>
+                <option value="7">Julio</option><option value="8">Agosto</option><option value="9">Septiembre</option>
+                <option value="10">Octubre</option><option value="11">Noviembre</option><option value="12">Diciembre</option>
+              </select>
+            </label>
           </section>
 
           <section class="panel">
@@ -226,9 +240,26 @@
       </section>
     </div>
 
+    <div class="modal" id="sessionEditModal" hidden>
+      <div class="modal-backdrop" data-close-session-edit></div>
+      <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="sessionEditTitle">
+        <div class="modal-title-row">
+          <h2 id="sessionEditTitle">Editar jornada</h2>
+          <button class="small-button" type="button" data-close-session-edit>Cerrar</button>
+        </div>
+        <form id="sessionEditForm">
+          <div id="sessionEditBody"></div>
+          <div class="form-actions">
+            <button class="primary-button" type="submit">Guardar cambios</button>
+            <button class="ghost-button" type="button" data-close-session-edit>Cancelar</button>
+          </div>
+        </form>
+      </section>
+    </div>
+
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="seed-data.js?v=001v19"></script>
-    <script src="app.js?v=001v19"></script>
+    <script src="seed-data.js?v=001v20"></script>
+    <script src="app.js?v=001v20"></script>
   </body>
 </html>

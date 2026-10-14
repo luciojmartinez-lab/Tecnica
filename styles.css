@@ -520,6 +520,56 @@ label select {
   color: var(--muted);
 }
 
+.record-actions {
+  display: grid;
+  gap: 3px;
+  justify-items: center;
+}
+
+#sessionEditBody {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+#sessionEditBody input,
+#sessionEditBody select {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 5px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+}
+
+.edit-session-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.edit-session-attempts {
+  display: grid;
+  gap: 4px;
+}
+
+.edit-session-attempt {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 95px 20px;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+}
+
+#seasonStartMonth {
+  min-height: 36px;
+  max-width: 240px;
+  margin-top: 6px;
+  padding: 5px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+}
+
 .record-cell-content > .inline-plus {
   position: absolute;
   top: 0;
@@ -1262,6 +1312,11 @@ label select {
 
   #filterAthlete {
     order: 4;
+  }
+
+  #filterSeason {
+    order: 5;
+    grid-column: 1 / -1;
   }
 
   .toolbar input,

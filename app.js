@@ -7,7 +7,7 @@
   const SYNC_META_KEY = "tecnica-sync-meta-v1";
   const MAX_AUTO_BACKUPS = 5;
   const AUTO_BACKUP_WINDOW_MS = 2 * 60 * 1000;
-  const APP_VERSION = "001v19";
+  const APP_VERSION = "001v20";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -56,6 +56,7 @@
   let syncMeta = loadSyncMeta();
   let activeSyncComparison = null;
   let cloudBackups = [];
+  let editingSessionIds = [];
   let expandedRecordCells = new Set();
   let toastTimer = null;
 
@@ -505,11 +506,12 @@
     });
 
     $("#recordsBody").addEventListener("click", (event) => {
-      const button = event.target.closest("[data-toggle-attempts], [data-delete-session], [data-delete-attempt]");
+      const button = event.target.closest("[data-toggle-attempts], [data-delete-session], [data-delete-attempt], [data-edit-session]");
       if (!button) return;
       if (button.dataset.toggleAttempts) toggleRecordAttempts(button.dataset.toggleAttempts);
       if (button.dataset.deleteSession) deleteSession(button.dataset.deleteSession);
       if (button.dataset.deleteAttempt) deleteAttempt(button.dataset.deleteAttempt);
+      if (button.dataset.editSession) openSessionEditor(button.dataset.editSession);
     });
 
     $("#athleteForm").addEventListener("submit", (event) => {
@@ -557,13 +559,23 @@
     $("#attemptModal").addEventListener("click", (event) => {
       if (event.target.closest("[data-close-modal]")) closeAttemptsModal();
     });
+    $("#sessionEditModal").addEventListener("click", (event) => {
+      if (event.target.closest("[data-close-session-edit]")) $("#sessionEditModal").hidden = true;
+    });
+    $("#sessionEditForm").addEventListener("change", (event) => {
+      if (event.target.id === "editSessionSelect") renderSessionEditForm(event.target.value);
+    });
+    $("#sessionEditForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      saveSessionEdit();
+    });
     $("#syncModal").addEventListener("click", (event) => {
       if (event.target.closest("[data-close-sync-modal]")) closeSyncModal();
     });
     $("#syncDownloadButton").addEventListener("click", downloadRemoteVersion);
     $("#syncUploadButton").addEventListener("click", uploadLocalVersion);
 
-    ["sortSelect", "filterDiscipline", "filterAthlete", "filterText"].forEach((id) => {
+    ["sortSelect", "filterDiscipline", "filterAthlete", "filterText", "filterSeason"].forEach((id) => {
       $("#" + id).addEventListener("input", () => {
         state.preferences[id] = $("#" + id).value;
         saveState(false);
@@ -588,6 +600,19 @@
       saveState(false);
       renderMetricPicker();
       drawChart();
+    });
+    $("#chartSeason").addEventListener("change", () => {
+      state.preferences.chartSeason = $("#chartSeason").value;
+      saveState(false);
+      renderMetricPicker();
+      drawChart();
+    });
+    $("#seasonStartMonth").addEventListener("change", () => {
+      state.settings.seasonStartMonth = Number($("#seasonStartMonth").value);
+      delete state.preferences.filterSeason;
+      delete state.preferences.chartSeason;
+      saveState();
+      renderAll();
     });
     $("#metricPicker").addEventListener("change", drawChart);
 
@@ -642,6 +667,7 @@
     renderSourceNotes();
     $("#syncKeyInput").value = state.preferences.syncKey || "";
     $("#syncEndpointInput").value = state.preferences.syncEndpoint || "/api/sync";
+    $("#seasonStartMonth").value = state.settings.seasonStartMonth || 9;
     drawChart();
   }
 
@@ -679,6 +705,32 @@
     $("#filterDiscipline").value = previousFilters.filterDiscipline;
     $("#filterAthlete").value = previousFilters.filterAthlete;
     $("#filterText").value = previousFilters.filterText;
+    const seasons = [...new Set(state.sessions.map((session) => seasonKey(session.date)))].filter(Boolean).sort((a, b) => b.localeCompare(a));
+    const options = `<option value="">Todas las temporadas</option>${seasons.map((season) => `<option value="${season}">Temporada ${seasonLabel(season)}</option>`).join("")}`;
+    ["filterSeason", "chartSeason"].forEach((id) => {
+      $("#" + id).innerHTML = options;
+      const selected = state.preferences[id] ?? seasons[0] ?? "";
+      $("#" + id).value = seasons.includes(selected) ? selected : "";
+    });
+  }
+
+  function seasonKey(date) {
+    const [year, month] = String(date || "").split("-").map(Number);
+    if (!year || !month) return "";
+    return String(year - (month < Number(state.settings.seasonStartMonth || 9) ? 1 : 0));
+  }
+
+  function seasonLabel(season) {
+    return Number(state.settings.seasonStartMonth || 9) === 1 ? season : `${season}/${String(Number(season) + 1).slice(-2)}`;
+  }
+
+  function matchesSeason(date, selectId) {
+    const selected = $("#" + selectId).value;
+    return !selected || seasonKey(date) === selected;
+  }
+
+  function chartAttempts() {
+    return flattenAttempts().filter((row) => matchesSeason(row.date, "chartSeason"));
   }
 
   function renderKpis() {
@@ -893,6 +945,7 @@
     state.preferences.filterDiscipline = disciplines.size === 1 ? [...disciplines][0] : "";
     state.preferences.filterText = "";
     state.preferences.sortSelect = "desc";
+    state.preferences.filterSeason = seasonKey(date);
     try {
       saveState();
     } catch (error) {
@@ -924,6 +977,7 @@
     const text = normalize($("#filterText").value);
     const best = bestByDay();
     const sorted = rows
+      .filter((row) => matchesSeason(row.date, "filterSeason"))
       .filter((row) => !disciplineFilter || row.discipline === disciplineFilter)
       .filter((row) => !athleteFilter || row.athleteId === athleteFilter)
       .filter((row) => !text || normalize(Object.values(row).join(" ")).includes(text))
@@ -974,7 +1028,7 @@
             <td>${row.mark == null ? '<span class="muted">-</span>' : `${fmt(row.mark)} ${row.unit}${isBest ? '<span class="best-badge">Mejor</span>' : ''}`}</td>
             <td>${row.distanceFeet == null ? "" : fmt(row.distanceFeet)}</td>
             <td>${row.distanceMeters == null ? "" : fmt(row.distanceMeters)}</td>
-            <td><button class="small-button delete-button" type="button" data-delete-attempt="${row.attemptId}">Eliminar</button></td>
+            <td><div class="record-actions"><button class="small-button delete-button" type="button" data-edit-session="${esc(row.sessionId)}">Editar</button><button class="small-button delete-button" type="button" data-delete-attempt="${row.attemptId}">Eliminar</button></div></td>
           </tr>
         `;
       })
@@ -986,6 +1040,7 @@
     const athleteFilter = $("#filterAthlete").value;
     const text = normalize($("#filterText").value);
     const groups = groupedSessions(disciplineId)
+      .filter((row) => matchesSeason(row.date, "filterSeason"))
       .filter((row) => !athleteFilter || row.athleteId === athleteFilter)
       .filter((row) => !text || normalize(Object.values(row.search).join(" ")).includes(text))
       .sort((a, b) => {
@@ -1013,7 +1068,7 @@
         <tr>
           <td>${shortDate(row.date)}${!athleteFilter ? `<small class="record-athlete">${esc(row.athleteName)}</small>` : ""}</td>
           ${columns.map((column) => `<td>${formatRecordCell(row, column.key)}</td>`).join("")}
-          <td><button class="small-button delete-button" type="button" data-delete-session="${row.sessionIds.join(",")}" aria-label="Eliminar jornada">Eliminar</button></td>
+          <td><div class="record-actions"><button class="small-button delete-button" type="button" data-edit-session="${esc(row.sessionIds.join(","))}">Editar</button><button class="small-button delete-button" type="button" data-delete-session="${row.sessionIds.join(",")}" aria-label="Eliminar jornada">Eliminar</button></div></td>
         </tr>
       `)
       .join("");
@@ -1197,6 +1252,77 @@
     state.sessions = state.sessions.filter((session) => session.attempts.length);
     saveState();
     renderAll();
+  }
+
+  function openSessionEditor(sessionIds) {
+    if (!collectPendingMarks($("#athleteSelect").value, $("#disciplineSelect").value)) return;
+    const ids = new Set(String(sessionIds).split(","));
+    editingSessionIds = state.sessions.filter((session) => ids.has(session.id))
+      .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))
+      .map((session) => session.id);
+    if (!editingSessionIds.length) return;
+    renderSessionEditForm(editingSessionIds[0]);
+    $("#sessionEditModal").hidden = false;
+  }
+
+  function renderSessionEditForm(sessionId) {
+    const session = state.sessions.find((item) => item.id === sessionId);
+    if (!session) return;
+    const athlete = state.athletes.find((item) => item.id === session.athleteId);
+    $("#sessionEditTitle").textContent = `${athlete?.name || session.athleteId} - ${DISCIPLINES[session.discipline]?.label || session.discipline}`;
+    $("#sessionEditBody").innerHTML = `
+      <label>Registro guardado
+        <select id="editSessionSelect">${editingSessionIds.map((id, index) => {
+          const record = state.sessions.find((item) => item.id === id);
+          if (!record) return "";
+          const savedAt = record.createdAt ? new Date(record.createdAt).toLocaleString("es-ES") : "Importado";
+          return `<option value="${esc(id)}" ${id === sessionId ? "selected" : ""}>${esc(savedAt)} - ${record.attempts.length} marcas (${index + 1})</option>`;
+        }).join("")}</select>
+      </label>
+      <div class="edit-session-fields">
+        <label>Fecha<input id="editSessionDate" type="date" required value="${esc(session.date)}"></label>
+        <label>Notas<input id="editSessionNotes" type="text" maxlength="120" value="${esc(session.notes || "")}"></label>
+      </div>
+      <div class="edit-session-attempts">${session.attempts.map((attempt, index) => `
+        <label class="edit-session-attempt">
+          <span>${esc(attempt.approachId ? attempt.approachLabel || attempt.approachId : attempt.eventName)} · ${index + 1}</span>
+          <input data-edit-attempt-index="${index}" type="number" inputmode="decimal" min="0" step="0.01" required value="${attempt.mark}">
+          <span>${esc(attempt.unit || "m")}</span>
+        </label>`).join("")}</div>`;
+  }
+
+  function saveSessionEdit() {
+    const id = $("#editSessionSelect").value;
+    const index = state.sessions.findIndex((session) => session.id === id);
+    if (index < 0) return toast("Esta jornada ya no existe");
+    const date = $("#editSessionDate").value;
+    const inputs = $$("[data-edit-attempt-index]");
+    if (!date || inputs.some((input) => parseMark(input.value) == null || !input.validity.valid)) return toast("Revisa la fecha y las marcas");
+    const original = state.sessions[index];
+    const originalUpdatedAt = state.updatedAt;
+    const originalPreferences = { ...state.preferences };
+    createAutoBackup("Antes de editar jornada", true);
+    const edited = clone(original);
+    edited.date = date;
+    edited.notes = $("#editSessionNotes").value.trim();
+    edited.updatedAt = new Date().toISOString();
+    inputs.forEach((input) => { edited.attempts[Number(input.dataset.editAttemptIndex)].mark = parseMark(input.value); });
+    state.sessions[index] = edited;
+    state.preferences.filterText = "";
+    state.preferences.sortSelect = "desc";
+    state.preferences.filterSeason = seasonKey(date);
+    try {
+      saveState();
+    } catch (error) {
+      state.sessions[index] = original;
+      state.updatedAt = originalUpdatedAt;
+      state.preferences = originalPreferences;
+      console.error(error);
+      return toast("No se pudo guardar. La jornada original sigue intacta");
+    }
+    renderAll();
+    $("#sessionEditModal").hidden = true;
+    toast(`Jornada corregida: ${shortDate(date)}`);
   }
 
   function deleteSession(sessionId) {
@@ -1504,7 +1630,7 @@
 
   function approachDateOptions(discipline) {
     const athleteId = $("#chartAthlete").value;
-    return Array.from(new Set(flattenAttempts()
+    return Array.from(new Set(chartAttempts()
       .filter((row) => row.athleteId === athleteId && row.discipline === discipline.id)
       .map((row) => row.date)))
       .sort((a, b) => b.localeCompare(a))
@@ -1538,7 +1664,7 @@
       return;
     }
 
-    const rows = flattenAttempts().filter((row) => row.athleteId === athleteId && checked.includes(row.metricKey));
+    const rows = chartAttempts().filter((row) => row.athleteId === athleteId && checked.includes(row.metricKey));
     const grouped = new Map();
     rows.forEach((row) => {
       const key = `${row.metricKey}|${row.date}`;
@@ -1630,7 +1756,7 @@
 
   function drawApproachChart(ctx, width, height, discipline, athleteId, checkedDates) {
     const approaches = discipline.approaches;
-    const rows = flattenAttempts().filter((row) => row.athleteId === athleteId && row.discipline === discipline.id);
+    const rows = chartAttempts().filter((row) => row.athleteId === athleteId && row.discipline === discipline.id);
     const selectedDates = checkedDates.length ? checkedDates : approachDateOptions(discipline).slice(0, 5).map((item) => item.key);
     const grouped = new Map();
     rows.forEach((row) => {
