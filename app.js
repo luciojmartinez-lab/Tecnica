@@ -7,7 +7,7 @@
   const SYNC_META_KEY = "tecnica-sync-meta-v1";
   const MAX_AUTO_BACKUPS = 5;
   const AUTO_BACKUP_WINDOW_MS = 2 * 60 * 1000;
-  const APP_VERSION = "001v20";
+  const APP_VERSION = "001v21";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -721,7 +721,7 @@
   }
 
   function seasonLabel(season) {
-    return Number(state.settings.seasonStartMonth || 9) === 1 ? season : `${season}/${String(Number(season) + 1).slice(-2)}`;
+    return Number(state.settings.seasonStartMonth || 9) === 1 ? season : `${String(season).slice(-2)}-${String(Number(season) + 1).slice(-2)}`;
   }
 
   function matchesSeason(date, selectId) {
