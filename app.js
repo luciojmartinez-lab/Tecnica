@@ -7,7 +7,7 @@
   const SYNC_META_KEY = "tecnica-sync-meta-v1";
   const MAX_AUTO_BACKUPS = 5;
   const AUTO_BACKUP_WINDOW_MS = 2 * 60 * 1000;
-  const APP_VERSION = "001v17";
+  const APP_VERSION = "001v18";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -73,10 +73,12 @@
     bindNavigation();
     bindForms();
     registerServiceWorker();
-    $("#dateInput").value = new Date().toISOString().slice(0, 10);
+    const today = new Date();
+    $("#dateInput").value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
     renderAll();
     restoreDraftForm();
     renderAttemptEditor();
+    updateDraftForm();
     createAutoBackup("Inicio");
     if (draft.attempts.length) toast("Hay marcas sin guardar");
     updateSyncStatus();
@@ -446,11 +448,24 @@
 
   function bindForms() {
     $("#disciplineSelect").addEventListener("change", () => {
+      const previous = draft.form?.disciplineId || "tests";
+      if (!collectPendingMarks(draft.form?.athleteId || $("#athleteSelect").value, previous)) {
+        $("#disciplineSelect").value = previous;
+        return;
+      }
       updateDraftForm();
       renderAttemptEditor();
     });
 
-    ["athleteSelect", "dateInput", "notesInput"].forEach((id) => {
+    $("#athleteSelect").addEventListener("change", () => {
+      const previous = draft.form?.athleteId || state.athletes.find((athlete) => athlete.active !== false)?.id;
+      if (!collectPendingMarks(previous, $("#disciplineSelect").value)) {
+        $("#athleteSelect").value = previous;
+        return;
+      }
+      updateDraftForm();
+    });
+    ["dateInput", "notesInput"].forEach((id) => {
       $("#" + id).addEventListener("input", updateDraftForm);
       $("#" + id).addEventListener("change", updateDraftForm);
     });
@@ -481,6 +496,7 @@
     $("#clearDraftButton").addEventListener("click", () => {
       clearDraft();
       renderAttemptEditor();
+      updateDraftForm();
       toast("Borrador limpio");
     });
 
@@ -619,11 +635,13 @@
   }
 
   function renderSelects() {
+    const selectedAthlete = $("#athleteSelect").value;
+    const selectedDiscipline = $("#disciplineSelect").value;
     const previousFilters = {
-      sortSelect: $("#sortSelect")?.value || state.preferences.sortSelect || "desc",
-      filterDiscipline: $("#filterDiscipline")?.value || state.preferences.filterDiscipline || "tests",
-      filterAthlete: $("#filterAthlete")?.value || state.preferences.filterAthlete || "",
-      filterText: $("#filterText")?.value || state.preferences.filterText || "",
+      sortSelect: state.preferences.sortSelect ?? "desc",
+      filterDiscipline: state.preferences.filterDiscipline ?? "tests",
+      filterAthlete: state.preferences.filterAthlete ?? "",
+      filterText: state.preferences.filterText ?? "",
     };
     const athleteOptions = state.athletes
       .filter((athlete) => athlete.active !== false)
@@ -631,7 +649,7 @@
       .join("");
     $("#athleteSelect").innerHTML = athleteOptions;
     $("#chartAthlete").innerHTML = athleteOptions;
-    $("#filterAthlete").innerHTML = `<option value="">Todos</option>${athleteOptions}`;
+    $("#filterAthlete").innerHTML = `<option value="">Todos</option>${state.athletes.map((athlete) => `<option value="${esc(athlete.id)}">${esc(athlete.name)}</option>`).join("")}`;
 
     const disciplineOptions = Object.values(DISCIPLINES)
       .map((discipline) => `<option value="${discipline.id}">${discipline.label}</option>`)
@@ -639,6 +657,9 @@
     $("#disciplineSelect").innerHTML = disciplineOptions;
     $("#chartDiscipline").innerHTML = disciplineOptions;
     $("#filterDiscipline").innerHTML = `<option value="">Todas</option>${disciplineOptions}`;
+
+    if (state.athletes.some((athlete) => athlete.id === selectedAthlete && athlete.active !== false)) $("#athleteSelect").value = selectedAthlete;
+    if (DISCIPLINES[selectedDiscipline]) $("#disciplineSelect").value = selectedDiscipline;
 
     if (state.preferences.chartAthlete) $("#chartAthlete").value = state.preferences.chartAthlete;
     $("#chartDiscipline").value = state.preferences.chartDiscipline || "tests";
@@ -709,7 +730,7 @@
     `;
   }
 
-  function addTestAttempt(metricId) {
+  function addTestAttempt(metricId, athleteId = $("#athleteSelect").value) {
     const discipline = DISCIPLINES.tests;
     const metric = discipline.metrics.find((item) => item.id === metricId);
     const card = $(`.attempt-card[data-metric="${metricId}"]`);
@@ -718,7 +739,7 @@
     if (mark == null) return toast("Introduce una marca");
     draft.attempts.push({
       draftId: cryptoId(),
-      athleteId: $("#athleteSelect").value,
+      athleteId,
       disciplineId: discipline.id,
       listKey: `tests:${metric.id}`,
       eventId: metric.id,
@@ -735,15 +756,15 @@
     renderDraftChips();
   }
 
-  function addApproachAttempt(approachId) {
-    const discipline = DISCIPLINES[$("#disciplineSelect").value];
+  function addApproachAttempt(approachId, athleteId = $("#athleteSelect").value, disciplineId = $("#disciplineSelect").value) {
+    const discipline = DISCIPLINES[disciplineId];
     const approach = discipline.approaches.find((item) => item.id === approachId);
     const card = $(`.attempt-card[data-approach="${approachId}"]`);
     const mark = parseMark($("[data-mark]", card).value);
     if (mark == null) return toast("Introduce una marca");
     draft.attempts.push({
       draftId: cryptoId(),
-      athleteId: $("#athleteSelect").value,
+      athleteId,
       disciplineId: discipline.id,
       listKey: `${discipline.id}:${approachId}`,
       eventId: `${discipline.id}_approach`,
@@ -785,10 +806,32 @@
     return String(name || "").slice(0, 3);
   }
 
+  function collectPendingMarks(athleteId, disciplineId) {
+    const pendingCards = $$(".attempt-card").filter((card) => $("input", card).value !== "");
+    if (pendingCards.some((card) => parseMark($("input", card).value) == null || !$("input", card).validity.valid)) {
+      toast("Revisa las marcas antes de continuar");
+      return false;
+    }
+    pendingCards.forEach((card) => {
+      if (card.dataset.metric) addTestAttempt(card.dataset.metric, athleteId);
+      else addApproachAttempt(card.dataset.approach, athleteId, disciplineId);
+    });
+    return true;
+  }
+
   function saveSessionFromDraft() {
     const date = $("#dateInput").value;
     const notes = $("#notesInput").value.trim();
+    if (!date) return toast("Selecciona una fecha");
+    if (!collectPendingMarks($("#athleteSelect").value, $("#disciplineSelect").value)) return;
     if (!draft.attempts.length) return toast("No hay marcas para guardar");
+    if (draft.attempts.some((attempt) => !state.athletes.some((athlete) => athlete.id === attempt.athleteId) || !DISCIPLINES[attempt.disciplineId])) {
+      return toast("Hay marcas de un atleta que ya no existe. Revisa el borrador");
+    }
+
+    const originalSessions = state.sessions.slice();
+    const originalPreferences = { ...state.preferences };
+    const originalUpdatedAt = state.updatedAt;
 
     const groups = new Map();
     draft.attempts.forEach((attempt) => {
@@ -833,10 +876,25 @@
         updatedAt: new Date().toISOString(),
       });
     });
+    const athletes = new Set(draft.attempts.map((attempt) => attempt.athleteId));
+    const disciplines = new Set(draft.attempts.map((attempt) => attempt.disciplineId));
+    state.preferences.filterAthlete = athletes.size === 1 ? [...athletes][0] : "";
+    state.preferences.filterDiscipline = disciplines.size === 1 ? [...disciplines][0] : "";
+    state.preferences.filterText = "";
+    state.preferences.sortSelect = "desc";
+    try {
+      saveState();
+    } catch (error) {
+      state.sessions = originalSessions;
+      state.preferences = originalPreferences;
+      state.updatedAt = originalUpdatedAt;
+      console.error(error);
+      return toast("No se pudo guardar. Las marcas siguen en el borrador; descarga un backup");
+    }
     clearDraft();
     $("#notesInput").value = "";
-    saveState();
     renderAll();
+    updateDraftForm();
     toast(groups.size === 1 ? "Jornada guardada" : `${groups.size} jornadas guardadas`);
   }
 
@@ -978,7 +1036,7 @@
             athleteName: athlete ? athlete.name : session.athleteId,
             values: {},
             search: {
-              date: session.date,
+              date: `${session.date} ${formatDate(session.date)} ${shortDate(session.date)}`,
               athlete: athlete ? athlete.name : session.athleteId,
               notes: "",
               values: "",
@@ -1704,6 +1762,7 @@
 
   async function downloadRemoteVersion() {
     const expectedRevision = activeSyncComparison?.remote?.revision;
+    const expectedLocalHash = activeSyncComparison?.local?.dataHash;
     if (!expectedRevision) return;
     setSyncButtonsDisabled(true);
     const remote = await fetchRemoteData();
@@ -1711,6 +1770,11 @@
     if (remote.revision !== expectedRevision) {
       setSyncButtonsDisabled(false);
       toast("La nube ha cambiado. Vuelve a elegir");
+      return showSyncDialog(true);
+    }
+    if (sharedDataHash(sharedData()) !== expectedLocalHash) {
+      setSyncButtonsDisabled(false);
+      toast("Los datos locales han cambiado. Vuelve a elegir");
       return showSyncDialog(true);
     }
 
@@ -1752,8 +1816,7 @@
       return;
     }
 
-    const localSignature = sharedDataHash(sharedData());
-    saveSyncMeta(result, localSignature);
+    saveSyncMeta(result, result.uploadedSignature);
     state.preferences.lastSyncAt = result.savedAt || new Date().toISOString();
     saveState(false);
     createAutoBackup("despues-de-sincronizar-2", true);
@@ -1812,7 +1875,7 @@
       const payload = await response.json().catch(() => ({}));
       if (response.status === 409) return { conflict: true, ...payload };
       if (!response.ok) throw new Error(JSON.stringify(payload));
-      return payload;
+      return { ...payload, uploadedSignature: sharedDataHash(data) };
     } catch (error) {
       console.error(error);
       toast("No se pudo subir");
@@ -1858,7 +1921,7 @@
 
   function normalizeIncoming(incoming) {
     const next = clone(incoming);
-    next.preferences = { ...(next.preferences || {}), ...(state.preferences || {}) };
+    next.preferences = { ...(state.preferences || {}) };
     next.updatedAt = next.updatedAt || new Date().toISOString();
     next.athletes = Array.isArray(next.athletes) ? next.athletes : [];
     next.sessions = Array.isArray(next.sessions) ? next.sessions : [];
