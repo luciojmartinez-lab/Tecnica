@@ -512,6 +512,14 @@ label select {
   display: inline-block;
 }
 
+.record-athlete {
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: 0.75em;
+  color: var(--muted);
+}
+
 .record-cell-content > .inline-plus {
   position: absolute;
   top: 0;

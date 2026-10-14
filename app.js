@@ -7,7 +7,7 @@
   const SYNC_META_KEY = "tecnica-sync-meta-v1";
   const MAX_AUTO_BACKUPS = 5;
   const AUTO_BACKUP_WINDOW_MS = 2 * 60 * 1000;
-  const APP_VERSION = "001v18";
+  const APP_VERSION = "001v19";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -55,6 +55,7 @@
   let autoBackups = loadAutoBackups();
   let syncMeta = loadSyncMeta();
   let activeSyncComparison = null;
+  let cloudBackups = [];
   let expandedRecordCells = new Set();
   let toastTimer = null;
 
@@ -370,6 +371,9 @@
   function resetSyncMeta() {
     syncMeta = {};
     activeSyncComparison = null;
+    cloudBackups = [];
+    const list = $("#cloudBackupList");
+    if (list) list.innerHTML = "";
     localStorage.removeItem(SYNC_META_KEY);
   }
 
@@ -418,8 +422,8 @@
     const form = draft.form || {};
     if (form.athleteId && state.athletes.some((athlete) => athlete.id === form.athleteId)) $("#athleteSelect").value = form.athleteId;
     if (form.disciplineId && DISCIPLINES[form.disciplineId]) $("#disciplineSelect").value = form.disciplineId;
-    if (form.date) $("#dateInput").value = form.date;
-    if (form.notes) $("#notesInput").value = form.notes;
+    if (draft.attempts.length && form.date) $("#dateInput").value = form.date;
+    if (draft.attempts.length && form.notes) $("#notesInput").value = form.notes;
   }
 
   function hasUnsavedDraft() {
@@ -603,6 +607,13 @@
       if (!button) return;
       if (button.dataset.restoreAutoBackup) restoreAutoBackup(button.dataset.restoreAutoBackup);
       if (button.dataset.downloadAutoBackup) downloadAutoBackup(button.dataset.downloadAutoBackup);
+    });
+
+    $("#loadCloudBackupsButton").addEventListener("click", loadCloudBackups);
+    $("#cloudBackupList").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-cloud-download], [data-cloud-restore]");
+      if (!button) return;
+      useCloudBackup(button.dataset.cloudDownload || button.dataset.cloudRestore, Boolean(button.dataset.cloudRestore));
     });
 
     $("#syncKeyInput").addEventListener("input", () => {
@@ -895,7 +906,8 @@
     $("#notesInput").value = "";
     renderAll();
     updateDraftForm();
-    toast(groups.size === 1 ? "Jornada guardada" : `${groups.size} jornadas guardadas`);
+    const savedGroups = [...groups.values()].map((group) => `${state.athletes.find((athlete) => athlete.id === group.athleteId)?.name || group.athleteId}: ${DISCIPLINES[group.disciplineId].label} (${group.attempts.length})`);
+    toast(`Guardado ${shortDate(date)}. ${savedGroups.join("; ")}`);
   }
 
   function renderRecords() {
@@ -999,7 +1011,7 @@
     body.innerHTML = groups
       .map((row) => `
         <tr>
-          <td>${shortDate(row.date)}</td>
+          <td>${shortDate(row.date)}${!athleteFilter ? `<small class="record-athlete">${esc(row.athleteName)}</small>` : ""}</td>
           ${columns.map((column) => `<td>${formatRecordCell(row, column.key)}</td>`).join("")}
           <td><button class="small-button delete-button" type="button" data-delete-session="${row.sessionIds.join(",")}" aria-label="Eliminar jornada">Eliminar</button></td>
         </tr>
@@ -1208,6 +1220,71 @@
         </div>
       `)
       .join("");
+  }
+
+  async function cloudRequest(query) {
+    if (!navigator.onLine) throw new Error("Sin conexion");
+    const key = getSyncKey();
+    if (!key) throw new Error("Falta la clave");
+    const endpoint = getSyncEndpoint();
+    const response = await fetch(`${endpoint}${endpoint.includes("?") ? "&" : "?"}${query}`, { headers: { "x-sync-key": key } });
+    if (key !== getSyncKey(true) || endpoint !== getSyncEndpoint()) throw new Error("La clave ha cambiado. Consulta de nuevo");
+    if (!response.ok) throw new Error(response.status === 404 ? "La copia ya no esta disponible" : "No se pudo consultar las copias");
+    return response.json();
+  }
+
+  async function loadCloudBackups() {
+    const button = $("#loadCloudBackupsButton");
+    button.disabled = true;
+    try {
+      const result = await cloudRequest("backups=1");
+      cloudBackups = result.backups || [];
+      $("#cloudBackupList").innerHTML = cloudBackups.length ? cloudBackups.map((backup) => `
+        <div class="auto-backup-row">
+          <div class="auto-backup-info">
+            <strong>${esc(formatBackupDateTime(backup.savedAt))}</strong>
+            <span>${esc(syncSummary(backup.summary))}</span>
+          </div>
+          <div class="auto-backup-actions">
+            <button class="small-button" type="button" data-cloud-download="${esc(backup.id)}">Backup</button>
+            <button class="small-button" type="button" data-cloud-restore="${esc(backup.id)}">Recuperar</button>
+          </div>
+        </div>`).join("") : `<p class="muted">Sin copias en la nube</p>`;
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function useCloudBackup(id, restore) {
+    const buttons = $$("button", $("#cloudBackupList"));
+    buttons.forEach((button) => { button.disabled = true; });
+    try {
+      const backup = await cloudRequest(`backup=${encodeURIComponent(id)}`);
+      if (!backup.data || !Array.isArray(backup.data.sessions) || !Array.isArray(backup.data.athletes)) throw new Error("Copia no valida");
+      if (!restore) {
+        download(`tecnica-nube-${id.slice(0, 12)}.json`, JSON.stringify(backup.data, null, 2), "application/json");
+        toast("Backup descargado");
+        return;
+      }
+      if (!confirm(`Recuperar en este dispositivo la copia del ${formatBackupDateTime(backup.savedAt)}? La nube seguira igual hasta que sincronices.`)) return;
+      createAutoBackup("Antes de recuperar nube", true);
+      const previous = state;
+      state = normalizeIncoming(backup.data);
+      try {
+        saveState();
+      } catch (error) {
+        state = previous;
+        throw new Error("No se pudo guardar la copia en este dispositivo");
+      }
+      renderAll();
+      toast("Copia recuperada en este dispositivo");
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      buttons.forEach((button) => { button.disabled = false; });
+    }
   }
 
   function renderAutoBackups() {
@@ -1822,7 +1899,7 @@
     createAutoBackup("despues-de-sincronizar-2", true);
     renderAll();
     closeSyncModal();
-    toast("Datos subidos");
+    toast(result.backupStored ? "Datos subidos y copia guardada en la nube" : "Datos subidos");
   }
 
   function setSyncButtonsDisabled(disabled) {

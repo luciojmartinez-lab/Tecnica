@@ -1,5 +1,7 @@
 import { getStore } from "@netlify/blobs";
 
+const MAX_CLOUD_BACKUPS = 10;
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "content-type,x-sync-key",
@@ -77,6 +79,26 @@ function metadata(saved) {
   };
 }
 
+async function archiveVersion(store, prefix, saved) {
+  if (!saved?.data) return;
+  const info = metadata(saved);
+  const id = await hashKey(info.revision);
+  await store.setJSON(`${prefix}${id}.json`, { ...info, data: sharedData(saved.data) }, {
+    onlyIfNew: true,
+    metadata: { ...info, id },
+  });
+}
+
+async function listBackups(store, prefix) {
+  const { blobs } = await store.list({ prefix });
+  const entries = await Promise.all(blobs.map(async (blob) => {
+    const record = await store.getMetadata(blob.key);
+    if (!record) return null;
+    return { ...record.metadata, id: blob.key.slice(prefix.length, -5) };
+  }));
+  return entries.filter(Boolean).sort((a, b) => String(b.savedAt).localeCompare(String(a.savedAt)));
+}
+
 export default async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
 
@@ -86,8 +108,20 @@ export default async (req) => {
   if (!key || key.length < 4) return json({ error: "sync_key_required" }, 401);
 
   const store = getStore({ name: "tecnica-sync", consistency: "strong" });
-  const blobKey = `datasets/${await hashKey(key)}.json`;
-  const saved = await store.get(blobKey, { type: "json" });
+  const datasetId = await hashKey(key);
+  const blobKey = `datasets/${datasetId}.json`;
+  const historyPrefix = `history/${datasetId}/`;
+  if (req.method === "GET" && url.searchParams.get("backups") === "1") {
+    return json({ backups: (await listBackups(store, historyPrefix)).slice(0, MAX_CLOUD_BACKUPS) });
+  }
+  if (req.method === "GET" && url.searchParams.has("backup")) {
+    const id = url.searchParams.get("backup");
+    if (!/^[a-f0-9]{64}$/.test(id)) return json({ error: "invalid_backup" }, 400);
+    const backup = await store.get(`${historyPrefix}${id}.json`, { type: "json" });
+    return backup ? json(backup) : json({ error: "backup_not_found" }, 404);
+  }
+  const record = await store.getWithMetadata(blobKey, { type: "json" });
+  const saved = record?.data;
   const current = metadata(saved);
 
   if (req.method === "GET") {
@@ -118,7 +152,10 @@ export default async (req) => {
       summary: summary(data),
       data,
     };
-    await store.setJSON(blobKey, payload, {
+    await archiveVersion(store, historyPrefix, saved);
+    await archiveVersion(store, historyPrefix, payload);
+    const write = await store.setJSON(blobKey, payload, {
+      ...(record ? { onlyIfMatch: record.etag } : { onlyIfNew: true }),
       metadata: {
         revision: payload.revision,
         updatedAt: payload.updatedAt,
@@ -127,7 +164,17 @@ export default async (req) => {
         app: "tecnica",
       },
     });
-    return json({ ok: true, ...metadata(payload) });
+    if (!write.modified) {
+      const latest = await store.get(blobKey, { type: "json" });
+      return json({ error: "revision_conflict", ...metadata(latest) }, 409);
+    }
+    try {
+      const history = await listBackups(store, historyPrefix);
+      await Promise.all(history.slice(MAX_CLOUD_BACKUPS).map((backup) => store.delete(`${historyPrefix}${backup.id}.json`)));
+    } catch (error) {
+      console.error("Cloud backup retention failed", error);
+    }
+    return json({ ok: true, backupStored: true, ...metadata(payload) });
   }
 
   return json({ error: "method_not_allowed" }, 405);
