@@ -521,9 +521,29 @@ label select {
 }
 
 .record-actions {
-  display: grid;
-  gap: 3px;
-  justify-items: center;
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+  flex-wrap: nowrap;
+}
+
+@media (min-width: 621px) {
+  .compact-record-table th:last-child,
+  .compact-record-table td:last-child {
+    width: 236px;
+  }
+}
+
+.chart-best-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 12px;
+  color: var(--ink);
+}
+
+.report-actions {
+  margin-top: 15px;
 }
 
 #sessionEditBody {
@@ -1389,6 +1409,17 @@ label select {
     min-height: 22px;
     padding: 0 3px;
     font-size: 0.53rem;
+  }
+
+  .record-actions {
+    display: grid;
+    justify-items: center;
+    gap: 2px;
+  }
+
+  .chart-best-control {
+    margin-bottom: 7px;
+    font-size: 0.76rem;
   }
 
   .inline-plus {

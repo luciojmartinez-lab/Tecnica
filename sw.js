@@ -1,10 +1,11 @@
-const CACHE_NAME = "tecnica-001v21";
+const CACHE_NAME = "tecnica-001v22";
 const ASSETS = [
   "./",
   "index.html",
-  "styles.css?v=001v21",
-  "app.js?v=001v21",
-  "seed-data.js?v=001v21",
+  "styles.css?v=001v22",
+  "app.js?v=001v22",
+  "seed-data.js?v=001v22",
+  "vendor/jspdf.umd.min.js",
   "manifest.webmanifest",
   "icons/icon.svg",
   "icons/icon-192.png",

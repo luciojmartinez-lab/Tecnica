@@ -7,7 +7,7 @@
   const SYNC_META_KEY = "tecnica-sync-meta-v1";
   const MAX_AUTO_BACKUPS = 5;
   const AUTO_BACKUP_WINDOW_MS = 2 * 60 * 1000;
-  const APP_VERSION = "001v21";
+  const APP_VERSION = "001v22";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -57,6 +57,7 @@
   let activeSyncComparison = null;
   let cloudBackups = [];
   let editingSessionIds = [];
+  let sessionReport = null;
   let expandedRecordCells = new Set();
   let toastTimer = null;
 
@@ -160,7 +161,7 @@
       session.attempts = Array.isArray(session.attempts) ? session.attempts : [];
       session.approachDistances = session.approachDistances || {};
       session.attempts.forEach((attempt) => {
-        if (attempt.approachId && (attempt.distanceFeet || attempt.distanceCm)) {
+        if (attempt.approachId && !session.approachDistances[attempt.approachId] && (attempt.distanceFeet || attempt.distanceCm)) {
           session.approachDistances[attempt.approachId] = {
             feet: attempt.distanceFeet ?? null,
             cm: attempt.distanceCm ?? null,
@@ -422,7 +423,8 @@
   function restoreDraftForm() {
     const form = draft.form || {};
     if (form.athleteId && state.athletes.some((athlete) => athlete.id === form.athleteId)) $("#athleteSelect").value = form.athleteId;
-    if (form.disciplineId && DISCIPLINES[form.disciplineId]) $("#disciplineSelect").value = form.disciplineId;
+    const selectedDiscipline = state.preferences.filterDiscipline || form.disciplineId;
+    if (DISCIPLINES[selectedDiscipline]) $("#disciplineSelect").value = selectedDiscipline;
     if (draft.attempts.length && form.date) $("#dateInput").value = form.date;
     if (draft.attempts.length && form.notes) $("#notesInput").value = form.notes;
   }
@@ -453,13 +455,7 @@
 
   function bindForms() {
     $("#disciplineSelect").addEventListener("change", () => {
-      const previous = draft.form?.disciplineId || "tests";
-      if (!collectPendingMarks(draft.form?.athleteId || $("#athleteSelect").value, previous)) {
-        $("#disciplineSelect").value = previous;
-        return;
-      }
-      updateDraftForm();
-      renderAttemptEditor();
+      selectDataDiscipline($("#disciplineSelect").value);
     });
 
     $("#athleteSelect").addEventListener("change", () => {
@@ -506,13 +502,24 @@
     });
 
     $("#recordsBody").addEventListener("click", (event) => {
-      const button = event.target.closest("[data-toggle-attempts], [data-delete-session], [data-delete-attempt], [data-edit-session]");
+      const button = event.target.closest("[data-toggle-attempts], [data-delete-session], [data-delete-attempt], [data-edit-session], [data-report-session]");
       if (!button) return;
       if (button.dataset.toggleAttempts) toggleRecordAttempts(button.dataset.toggleAttempts);
       if (button.dataset.deleteSession) deleteSession(button.dataset.deleteSession);
       if (button.dataset.deleteAttempt) deleteAttempt(button.dataset.deleteAttempt);
       if (button.dataset.editSession) openSessionEditor(button.dataset.editSession);
+      if (button.dataset.reportSession) openSessionReport(button.dataset.reportSession);
     });
+    $("#recordsBody").addEventListener("dblclick", (event) => {
+      if (event.target.closest("button, a, input, select")) return;
+      const row = event.target.closest("tr[data-session-ids]");
+      if (row) openSessionEditor(row.dataset.sessionIds);
+    });
+    $("#reportModal").addEventListener("click", (event) => {
+      if (event.target.closest("[data-close-report]")) $("#reportModal").hidden = true;
+    });
+    $("#downloadReportButton").addEventListener("click", downloadSessionReport);
+    $("#shareReportButton").addEventListener("click", shareSessionReport);
 
     $("#athleteForm").addEventListener("submit", (event) => {
       event.preventDefault();
@@ -577,6 +584,10 @@
 
     ["sortSelect", "filterDiscipline", "filterAthlete", "filterText", "filterSeason"].forEach((id) => {
       $("#" + id).addEventListener("input", () => {
+        if (id === "filterDiscipline") {
+          selectDataDiscipline($("#filterDiscipline").value);
+          return;
+        }
         state.preferences[id] = $("#" + id).value;
         saveState(false);
         renderRecords();
@@ -615,6 +626,12 @@
       renderAll();
     });
     $("#metricPicker").addEventListener("change", drawChart);
+    $("#chartBestOnly").addEventListener("change", () => {
+      state.preferences.chartBestOnly = $("#chartBestOnly").checked;
+      saveState(false);
+      renderMetricPicker();
+      drawChart();
+    });
 
     $("#exportButton").addEventListener("click", exportBackup);
     $("#backupTopButton").addEventListener("click", exportBackup);
@@ -671,6 +688,22 @@
     drawChart();
   }
 
+  function selectDataDiscipline(disciplineId) {
+    const previous = draft.form?.disciplineId || $("#disciplineSelect").value || "tests";
+    if (disciplineId && !collectPendingMarks($("#athleteSelect").value, previous)) {
+      $("#disciplineSelect").value = previous;
+      $("#filterDiscipline").value = state.preferences.filterDiscipline ?? previous;
+      return;
+    }
+    if (DISCIPLINES[disciplineId]) $("#disciplineSelect").value = disciplineId;
+    $("#filterDiscipline").value = disciplineId;
+    state.preferences.filterDiscipline = disciplineId;
+    saveState(false);
+    updateDraftForm();
+    if (disciplineId) renderAttemptEditor();
+    renderRecords();
+  }
+
   function renderSelects() {
     const selectedAthlete = $("#athleteSelect").value;
     const selectedDiscipline = $("#disciplineSelect").value;
@@ -703,6 +736,8 @@
     $("#chartMode").value = state.preferences.chartMode || "date";
     $("#sortSelect").value = previousFilters.sortSelect;
     $("#filterDiscipline").value = previousFilters.filterDiscipline;
+    if (DISCIPLINES[previousFilters.filterDiscipline]) $("#disciplineSelect").value = previousFilters.filterDiscipline;
+    $("#chartBestOnly").checked = Boolean(state.preferences.chartBestOnly);
     $("#filterAthlete").value = previousFilters.filterAthlete;
     $("#filterText").value = previousFilters.filterText;
     const seasons = [...new Set(state.sessions.map((session) => seasonKey(session.date)))].filter(Boolean).sort((a, b) => b.localeCompare(a));
@@ -934,7 +969,8 @@
         discipline: group.disciplineId,
         notes,
         attempts,
-        approachDistances: {},
+        approachDistances: Object.fromEntries([...new Set(attempts.map((attempt) => attempt.approachId).filter(Boolean))]
+          .map((approachId) => [approachId, clone(getConfiguredDistance(group.athleteId, group.disciplineId, approachId))])),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
@@ -1020,7 +1056,7 @@
         const bestKey = keyForBest(row);
         const isBest = row.mark != null && best.get(bestKey) === row.mark;
         return `
-          <tr>
+          <tr data-session-ids="${esc(row.sessionId)}">
             <td>${formatDate(row.date)}</td>
             <td>${esc(row.athleteName)}</td>
             <td>${esc(row.disciplineLabel)}</td>
@@ -1028,7 +1064,7 @@
             <td>${row.mark == null ? '<span class="muted">-</span>' : `${fmt(row.mark)} ${row.unit}${isBest ? '<span class="best-badge">Mejor</span>' : ''}`}</td>
             <td>${row.distanceFeet == null ? "" : fmt(row.distanceFeet)}</td>
             <td>${row.distanceMeters == null ? "" : fmt(row.distanceMeters)}</td>
-            <td><div class="record-actions"><button class="small-button delete-button" type="button" data-edit-session="${esc(row.sessionId)}">Editar</button><button class="small-button delete-button" type="button" data-delete-attempt="${row.attemptId}">Eliminar</button></div></td>
+            <td>${recordActions(row.sessionId, row.sessionId, row.attemptId)}</td>
           </tr>
         `;
       })
@@ -1065,13 +1101,163 @@
 
     body.innerHTML = groups
       .map((row) => `
-        <tr>
+        <tr data-session-ids="${esc(row.sessionIds.join(","))}">
           <td>${shortDate(row.date)}${!athleteFilter ? `<small class="record-athlete">${esc(row.athleteName)}</small>` : ""}</td>
           ${columns.map((column) => `<td>${formatRecordCell(row, column.key)}</td>`).join("")}
-          <td><div class="record-actions"><button class="small-button delete-button" type="button" data-edit-session="${esc(row.sessionIds.join(","))}">Editar</button><button class="small-button delete-button" type="button" data-delete-session="${row.sessionIds.join(",")}" aria-label="Eliminar jornada">Eliminar</button></div></td>
+          <td>${recordActions(row.sessionIds.join(","))}</td>
         </tr>
       `)
       .join("");
+  }
+
+  function recordActions(sessionIds, reportIds = sessionIds, attemptId = null) {
+    return `<div class="record-actions">
+      <button class="small-button delete-button" type="button" data-edit-session="${esc(sessionIds)}">Editar</button>
+      <button class="small-button delete-button" type="button" data-report-session="${esc(reportIds)}">Informe</button>
+      <button class="small-button delete-button" type="button" ${attemptId ? `data-delete-attempt="${esc(attemptId)}"` : `data-delete-session="${esc(sessionIds)}"`}>Eliminar</button>
+    </div>`;
+  }
+
+  function reportDistance(session, approachId) {
+    if (!approachId) return "-";
+    const distance = session.approachDistances?.[approachId] || getConfiguredDistance(session.athleteId, session.discipline, approachId, session);
+    if (session.discipline === "altura") {
+      return `${distance.horizontal == null ? "-" : fmt(distance.horizontal)} p horiz. x ${distance.vertical == null ? "-" : fmt(distance.vertical)} p vert.`;
+    }
+    const meters = distance.meters ?? legacyDistanceMeters(distance.cm);
+    return `${meters == null ? "-" : fmt(meters)} m / ${distance.feet == null ? "-" : fmt(distance.feet)} pies`;
+  }
+
+  function openSessionReport(sessionIds) {
+    const ids = new Set(String(sessionIds).split(","));
+    const first = state.sessions.find((session) => ids.has(session.id));
+    if (!first) return;
+    sessionReport = {
+      athlete: state.athletes.find((athlete) => athlete.id === first.athleteId)?.name || first.athleteId,
+      date: first.date,
+      season: seasonLabel(seasonKey(first.date)),
+      sessions: clone(state.sessions.filter((session) => session.athleteId === first.athleteId && session.date === first.date)),
+    };
+    // Resolve legacy distances now, so PDF generation uses one consistent snapshot.
+    sessionReport.sessions.forEach((session) => {
+      session.attempts.forEach((attempt) => { attempt.reportDistance = reportDistance(session, attempt.approachId); });
+    });
+    $("#reportSummary").textContent = `${sessionReport.athlete} - ${formatDate(sessionReport.date)} - ${sessionReport.sessions.reduce((count, session) => count + session.attempts.length, 0)} intentos`;
+    $("#reportModal").hidden = false;
+  }
+
+  function buildSessionPdf(report) {
+    const doc = new window.jspdf.jsPDF({ unit: "mm", format: "a4" });
+    doc.setProperties({ title: `Jornada de tecnica - ${report.athlete} - ${formatDate(report.date)}`, author: "Tecnica" });
+    let y = 20;
+    function newPageIfNeeded(height) {
+      if (y + height <= 275) return;
+      doc.addPage();
+      y = 20;
+    }
+    function textBlock(text, size = 10, bold = false, color = [20, 32, 51]) {
+      doc.setFont("helvetica", bold ? "bold" : "normal");
+      doc.setFontSize(size);
+      const lines = doc.splitTextToSize(String(text), 174);
+      const lineHeight = size * 0.48;
+      for (const line of lines) {
+        newPageIfNeeded(lineHeight + 2);
+        doc.setTextColor(...color);
+        doc.text(line, 18, y);
+        y += lineHeight;
+      }
+      y += 3;
+    }
+    textBlock("TECNICA - INFORME DE JORNADA", 12, true, [23, 111, 198]);
+    textBlock(report.athlete, 19, true);
+    textBlock(`${formatDate(report.date)}   |   Temporada ${report.season}`, 11);
+    for (const discipline of Object.values(DISCIPLINES)) {
+      const sessions = report.sessions.filter((session) => session.discipline === discipline.id);
+      if (!sessions.length) continue;
+      const best = new Map();
+      sessions.flatMap((session) => session.attempts).forEach((attempt) => {
+        const key = attempt.approachId || attempt.eventId;
+        best.set(key, Math.max(best.get(key) ?? -Infinity, attempt.mark));
+      });
+      newPageIfNeeded(40);
+      y += 3;
+      textBlock(discipline.label, 13, true);
+      const counts = {};
+      function tableHeader() {
+        newPageIfNeeded(12);
+        doc.setFillColor(23, 111, 198);
+        doc.rect(18, y - 4, 174, 8, "F");
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9);
+        doc.setTextColor(255, 255, 255);
+        ["Prueba / carrera", "Intento", "Marca", "Distancia de carrera"].forEach((label, index) => doc.text(label, [20, 84, 106, 136][index], y + 1));
+        y += 10;
+      }
+      tableHeader();
+      sessions.forEach((session) => {
+        session.attempts.forEach((attempt) => {
+          const key = attempt.approachId || attempt.eventId;
+          counts[key] = (counts[key] || 0) + 1;
+          const label = attempt.approachId ? discipline.approaches.find((approach) => approach.id === attempt.approachId)?.short || attempt.approachLabel : attempt.eventName;
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9);
+          const labelLines = doc.splitTextToSize(label, 60);
+          const distanceLines = doc.splitTextToSize(attempt.reportDistance || "-", 53);
+          const height = Math.max(8, Math.max(labelLines.length, distanceLines.length) * 4 + 3);
+          if (y + height > 275) { doc.addPage(); y = 20; tableHeader(); }
+          const isBest = attempt.mark === best.get(key);
+          doc.setFillColor(isBest ? 235 : 248, isBest ? 244 : 249, isBest ? 255 : 251);
+          doc.rect(18, y - 4, 174, height, "F");
+          doc.setTextColor(20, 32, 51);
+          doc.setFont("helvetica", "normal");
+          doc.text(labelLines, 20, y);
+          doc.text(String(counts[key]), 84, y);
+          doc.text(distanceLines, 136, y);
+          doc.setFont("helvetica", isBest ? "bold" : "normal");
+          doc.setTextColor(...(isBest ? [23, 111, 198] : [20, 32, 51]));
+          doc.text(`${fmt(attempt.mark)} ${attempt.unit || "m"}`, 106, y);
+          y += height;
+        });
+        if (session.notes) { y += 4; textBlock(`Notas: ${session.notes}`, 9); }
+      });
+    }
+    const pages = doc.getNumberOfPages();
+    for (let page = 1; page <= pages; page += 1) {
+      doc.setPage(page);
+      doc.setTextColor(99, 112, 132);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.text("Mejores marcas en azul y negrita. Distancias sin registrar: -", 18, 286);
+      doc.text(`${page} / ${pages}`, 192, 286, { align: "right" });
+    }
+    return doc;
+  }
+
+  function reportFile() {
+    const filename = `tecnica-${slug(sessionReport.athlete)}-${sessionReport.date}.pdf`;
+    return new File([buildSessionPdf(sessionReport).output("blob")], filename, { type: "application/pdf" });
+  }
+
+  function downloadSessionReport() {
+    if (!sessionReport) return;
+    try {
+      buildSessionPdf(sessionReport).save(`tecnica-${slug(sessionReport.athlete)}-${sessionReport.date}.pdf`);
+      toast("Informe PDF descargado");
+    } catch (error) { console.error(error); toast("No se pudo generar el PDF"); }
+  }
+
+  async function shareSessionReport() {
+    if (!sessionReport) return;
+    try {
+      const file = reportFile();
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: `Jornada de ${sessionReport.athlete}` });
+      } else {
+        downloadSessionReport();
+      }
+    } catch (error) {
+      if (error.name !== "AbortError") { console.error(error); toast("No se pudo compartir el PDF"); }
+    }
   }
 
   function recordColumns(discipline) {
@@ -1606,10 +1792,11 @@
   function renderMetricPicker() {
     const discipline = DISCIPLINES[$("#chartDiscipline").value] || DISCIPLINES.tests;
     const mode = $("#chartMode")?.value || "date";
-    const options = mode === "approach" && discipline.mode === "approach"
+    const bestOnly = $("#chartBestOnly").checked;
+    const options = !bestOnly && mode === "approach" && discipline.mode === "approach"
       ? approachDateOptions(discipline)
       : metricOptions(discipline);
-    const prefKey = mode === "approach" ? `${discipline.id}:dates` : discipline.id;
+    const prefKey = !bestOnly && mode === "approach" && discipline.mode === "approach" ? `${discipline.id}:dates` : discipline.id;
     const selected = new Set(state.preferences.chartMetrics?.[prefKey] || options.slice(0, 5).map((item) => item.key));
     $("#metricPicker").innerHTML = options
       .map((metric) => `
@@ -1643,8 +1830,9 @@
     const ctx = canvas.getContext("2d");
     const ratio = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
-    canvas.width = Math.max(680, Math.floor(rect.width * ratio));
-    canvas.height = Math.max(360, Math.floor(rect.height * ratio));
+    if (!rect.width || !rect.height) return;
+    canvas.width = Math.max(1, Math.floor(rect.width * ratio));
+    canvas.height = Math.max(1, Math.floor(rect.height * ratio));
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     const width = canvas.width / ratio;
     const height = canvas.height / ratio;
@@ -1653,11 +1841,17 @@
     const discipline = DISCIPLINES[$("#chartDiscipline").value] || DISCIPLINES.tests;
     const athleteId = $("#chartAthlete").value;
     const mode = $("#chartMode")?.value || "date";
+    const bestOnly = $("#chartBestOnly").checked;
     const checked = $$("input:checked", $("#metricPicker")).map((input) => input.value);
     state.preferences.chartMetrics = state.preferences.chartMetrics || {};
-    const prefKey = mode === "approach" && discipline.mode === "approach" ? `${discipline.id}:dates` : discipline.id;
+    const prefKey = !bestOnly && mode === "approach" && discipline.mode === "approach" ? `${discipline.id}:dates` : discipline.id;
     state.preferences.chartMetrics[prefKey] = checked;
     saveState(false);
+
+    if (bestOnly) {
+      drawBestMarksChart(ctx, width, height, discipline, athleteId, checked);
+      return;
+    }
 
     if (mode === "approach" && discipline.mode === "approach") {
       drawApproachChart(ctx, width, height, discipline, athleteId, checked);
@@ -1752,6 +1946,44 @@
     $("#chartLegend").innerHTML = metrics
       .map((metric, index) => `<span class="legend-item"><span class="legend-swatch" style="background:${COLORS[index % COLORS.length]}"></span>${esc(metric.label)}</span>`)
       .join("");
+  }
+
+  function drawBestMarksChart(ctx, width, height, discipline, athleteId, checked) {
+    const metrics = metricOptions(discipline).filter((metric) => checked.includes(metric.key));
+    const best = new Map();
+    chartAttempts().filter((row) => row.athleteId === athleteId && row.discipline === discipline.id && checked.includes(row.metricKey))
+      .forEach((row) => {
+        if (!best.has(row.metricKey) || row.mark > best.get(row.metricKey).mark) best.set(row.metricKey, row);
+      });
+    if (!best.size) {
+      drawEmptyChart(ctx, width, height, "Sin marcas para esta seleccion");
+      $("#chartLegend").innerHTML = "";
+      return;
+    }
+    const left = 58, right = 24, top = 36, bottom = 58;
+    const maximum = Math.max(...[...best.values()].map((row) => row.mark));
+    const yMax = Math.max(1, maximum * 1.18);
+    const yAt = (value) => top + (height - top - bottom) * (1 - value / yMax);
+    drawChartFrame(ctx, width, height, left, right, top, bottom, 0, yMax, yAt);
+    const plotWidth = width - left - right;
+    metrics.forEach((metric, index) => {
+      const row = best.get(metric.key);
+      const x = left + plotWidth * (index + 0.5) / metrics.length;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.fillStyle = "#637084";
+      ctx.fillText(metric.label, x, height - bottom + 12);
+      if (!row) return;
+      const barWidth = Math.min(48, plotWidth / metrics.length * 0.5);
+      ctx.fillStyle = COLORS[index % COLORS.length];
+      ctx.fillRect(x - barWidth / 2, yAt(row.mark), barWidth, yAt(0) - yAt(row.mark));
+      ctx.textBaseline = "bottom";
+      ctx.fillText(`${fmt(row.mark)} ${row.unit}`, x, yAt(row.mark) - 7);
+    });
+    $("#chartLegend").innerHTML = metrics.filter((metric) => best.has(metric.key)).map((metric) => {
+      const row = best.get(metric.key);
+      return `<span class="legend-item">${esc(metric.label)}: ${fmt(row.mark)} ${esc(row.unit)} (${shortDate(row.date)})</span>`;
+    }).join("");
   }
 
   function drawApproachChart(ctx, width, height, discipline, athleteId, checkedDates) {
