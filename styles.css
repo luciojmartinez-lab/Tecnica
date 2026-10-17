@@ -566,23 +566,33 @@ label select {
 }
 
 #reportPreview {
-  display: grid;
-  justify-items: center;
-  align-content: start;
-  gap: 12px;
+  display: block;
   min-height: 0;
   flex: 1;
   overflow: auto;
   padding: 8px;
   background: var(--soft);
+  touch-action: pan-x pan-y;
+  overscroll-behavior: contain;
 }
 
 .report-preview-page {
   display: block;
-  max-width: 100%;
   height: auto !important;
+  margin: 0 auto 12px;
   background: white;
 }
+
+.report-zoom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-bottom: 8px;
+}
+
+.report-zoom button { min-width: 44px; min-height: 44px; font-size: 1.1rem; }
+#reportZoomValue { min-width: 52px; text-align: center; font-variant-numeric: tabular-nums; }
 
 #sessionEditBody {
   display: grid;

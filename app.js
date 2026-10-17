@@ -7,7 +7,7 @@
   const SYNC_META_KEY = "tecnica-sync-meta-v1";
   const MAX_AUTO_BACKUPS = 5;
   const AUTO_BACKUP_WINDOW_MS = 2 * 60 * 1000;
-  const APP_VERSION = "001v23";
+  const APP_VERSION = "001v24";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -61,6 +61,8 @@
   let sessionReportFile = null;
   let reportPreviewLoadingTask = null;
   let reportPreviewGeneration = 0;
+  let reportZoom = 1;
+  let reportPinch = null;
   let expandedRecordCells = new Set();
   let toastTimer = null;
 
@@ -523,6 +525,28 @@
     });
     $("#downloadReportButton").addEventListener("click", downloadSessionReport);
     $("#shareReportButton").addEventListener("click", shareSessionReport);
+    $("#reportZoomIn").addEventListener("click", () => setReportZoom(reportZoom + 0.25));
+    $("#reportZoomOut").addEventListener("click", () => setReportZoom(reportZoom - 0.25));
+    $("#reportZoomFit").addEventListener("click", () => setReportZoom(1));
+    const reportPreview = $("#reportPreview");
+    new ResizeObserver(() => {
+      if (!$("#reportModal").hidden) setReportZoom(reportZoom);
+    }).observe(reportPreview);
+    reportPreview.addEventListener("touchstart", (event) => {
+      if (event.touches.length !== 2) return;
+      event.preventDefault();
+      const [a, b] = event.touches;
+      reportPinch = { distance: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), zoom: reportZoom };
+    }, { passive: false });
+    reportPreview.addEventListener("touchmove", (event) => {
+      if (!reportPinch || event.touches.length !== 2) return;
+      event.preventDefault();
+      const [a, b] = event.touches;
+      const bounds = reportPreview.getBoundingClientRect();
+      setReportZoom(reportPinch.zoom * Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) / reportPinch.distance,
+        (a.clientX + b.clientX) / 2 - bounds.left, (a.clientY + b.clientY) / 2 - bounds.top);
+    }, { passive: false });
+    for (const name of ["touchend", "touchcancel"]) reportPreview.addEventListener(name, () => { reportPinch = null; });
 
     $("#athleteForm").addEventListener("submit", (event) => {
       event.preventDefault();
@@ -1156,6 +1180,25 @@
     if (reportPreviewLoadingTask) reportPreviewLoadingTask.destroy().catch(console.error);
     reportPreviewLoadingTask = null;
     $("#reportPreview").replaceChildren();
+    reportPinch = null;
+  }
+
+  function setReportZoom(value, x, y) {
+    const root = $("#reportPreview");
+    const previous = reportZoom;
+    reportZoom = Math.max(1, Math.min(3, value));
+    x ??= root.clientWidth / 2;
+    y ??= root.clientHeight / 2;
+    const left = (root.scrollLeft + x) * reportZoom / previous - x;
+    const top = (root.scrollTop + y) * reportZoom / previous - y;
+    root.querySelectorAll("canvas").forEach((canvas) => {
+      canvas.style.width = `${Math.min(root.clientWidth - 16, 816) * reportZoom}px`;
+    });
+    root.scrollLeft = left;
+    root.scrollTop = top;
+    $("#reportZoomValue").textContent = `${Math.round(reportZoom * 100)}%`;
+    $("#reportZoomOut").disabled = reportZoom <= 1;
+    $("#reportZoomIn").disabled = reportZoom >= 3;
   }
 
   async function prepareReportPreview() {
@@ -1166,6 +1209,8 @@
     const root = $("#reportPreview");
     root.setAttribute("aria-busy", "true");
     root.innerHTML = `<p class="muted">Preparando informe...</p>`;
+    reportZoom = 1;
+    setReportZoom(1);
     $("#downloadReportButton").disabled = true;
     $("#shareReportButton").disabled = true;
     try {
@@ -1185,14 +1230,15 @@
         if (generation !== reportPreviewGeneration) return;
         const page = await pdf.getPage(number);
         const original = page.getViewport({ scale: 1 });
-        const scale = Math.min(root.clientWidth, 816) / original.width;
-        const ratio = Math.min(window.devicePixelRatio || 1, 2);
+        const scale = Math.min(root.clientWidth - 16, 816) / original.width;
+        // Keep text sharp when the preview is enlarged up to 300%.
+        const ratio = 3;
         const viewport = page.getViewport({ scale: scale * ratio });
         const canvas = document.createElement("canvas");
         canvas.className = "report-preview-page";
         canvas.width = Math.ceil(viewport.width);
         canvas.height = Math.ceil(viewport.height);
-        canvas.style.width = `${viewport.width / ratio}px`;
+        canvas.style.width = `${viewport.width / ratio * reportZoom}px`;
         canvas.style.height = `${viewport.height / ratio}px`;
         canvas.setAttribute("aria-label", `Pagina ${number} de ${pdf.numPages}`);
         root.append(canvas);

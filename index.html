@@ -8,7 +8,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="icons/icon.svg">
-    <link rel="stylesheet" href="styles.css?v=001v23">
+    <link rel="stylesheet" href="styles.css?v=001v24">
   </head>
   <body>
     <div class="app-shell">
@@ -21,7 +21,7 @@
           </div>
         </div>
         <div class="header-stack">
-          <span class="version-pill">001v23</span>
+          <span class="version-pill">001v24</span>
           <span class="sync-pill" id="syncStatus">Local</span>
         </div>
       </header>
@@ -250,6 +250,12 @@
           <button class="primary-button" id="downloadReportButton" type="button">Descargar PDF</button>
           <button class="ghost-button" id="shareReportButton" type="button">Compartir PDF</button>
         </div>
+        <div class="report-zoom" role="group" aria-label="Zoom del informe">
+          <button class="small-button" id="reportZoomOut" type="button" title="Reducir" aria-label="Reducir">&#8722;</button>
+          <output id="reportZoomValue" aria-live="polite">100%</output>
+          <button class="small-button" id="reportZoomIn" type="button" title="Ampliar" aria-label="Ampliar">+</button>
+          <button class="small-button" id="reportZoomFit" type="button" title="Ajustar al ancho" aria-label="Ajustar al ancho">&#8596;</button>
+        </div>
         <div id="reportPreview" aria-label="Vista previa del informe" aria-live="polite"></div>
       </section>
     </div>
@@ -274,7 +280,7 @@
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
     <script src="vendor/jspdf.umd.min.js"></script>
-    <script src="seed-data.js?v=001v23"></script>
-    <script src="app.js?v=001v23"></script>
+    <script src="seed-data.js?v=001v24"></script>
+    <script src="app.js?v=001v24"></script>
   </body>
 </html>
