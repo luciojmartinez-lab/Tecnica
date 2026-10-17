@@ -7,7 +7,7 @@
   const SYNC_META_KEY = "tecnica-sync-meta-v1";
   const MAX_AUTO_BACKUPS = 5;
   const AUTO_BACKUP_WINDOW_MS = 2 * 60 * 1000;
-  const APP_VERSION = "001v22";
+  const APP_VERSION = "001v23";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -58,6 +58,9 @@
   let cloudBackups = [];
   let editingSessionIds = [];
   let sessionReport = null;
+  let sessionReportFile = null;
+  let reportPreviewLoadingTask = null;
+  let reportPreviewGeneration = 0;
   let expandedRecordCells = new Set();
   let toastTimer = null;
 
@@ -516,7 +519,7 @@
       if (row) openSessionEditor(row.dataset.sessionIds);
     });
     $("#reportModal").addEventListener("click", (event) => {
-      if (event.target.closest("[data-close-report]")) $("#reportModal").hidden = true;
+      if (event.target.closest("[data-close-report]")) closeSessionReport();
     });
     $("#downloadReportButton").addEventListener("click", downloadSessionReport);
     $("#shareReportButton").addEventListener("click", shareSessionReport);
@@ -1144,6 +1147,69 @@
     });
     $("#reportSummary").textContent = `${sessionReport.athlete} - ${formatDate(sessionReport.date)} - ${sessionReport.sessions.reduce((count, session) => count + session.attempts.length, 0)} intentos`;
     $("#reportModal").hidden = false;
+    prepareReportPreview();
+  }
+
+  function closeSessionReport() {
+    $("#reportModal").hidden = true;
+    reportPreviewGeneration += 1;
+    if (reportPreviewLoadingTask) reportPreviewLoadingTask.destroy().catch(console.error);
+    reportPreviewLoadingTask = null;
+    $("#reportPreview").replaceChildren();
+  }
+
+  async function prepareReportPreview() {
+    const generation = ++reportPreviewGeneration;
+    if (reportPreviewLoadingTask) reportPreviewLoadingTask.destroy().catch(console.error);
+    reportPreviewLoadingTask = null;
+    sessionReportFile = null;
+    const root = $("#reportPreview");
+    root.setAttribute("aria-busy", "true");
+    root.innerHTML = `<p class="muted">Preparando informe...</p>`;
+    $("#downloadReportButton").disabled = true;
+    $("#shareReportButton").disabled = true;
+    try {
+      const filename = `tecnica-${slug(sessionReport.athlete)}-${sessionReport.date}.pdf`;
+      const file = new File([buildSessionPdf(sessionReport).output("blob")], filename, { type: "application/pdf" });
+      const pdfjs = await import("./vendor/pdf.mjs");
+      pdfjs.GlobalWorkerOptions.workerSrc = new URL("vendor/pdf.worker.mjs", document.baseURI).href;
+      const data = new Uint8Array(await file.arrayBuffer());
+      if (generation !== reportPreviewGeneration) return;
+      const loadingTask = pdfjs.getDocument({ data, useSystemFonts: true, isEvalSupported: false });
+      reportPreviewLoadingTask = loadingTask;
+      const pdf = await loadingTask.promise;
+      if (generation !== reportPreviewGeneration) return;
+      sessionReportFile = file;
+      root.replaceChildren();
+      for (let number = 1; number <= pdf.numPages; number += 1) {
+        if (generation !== reportPreviewGeneration) return;
+        const page = await pdf.getPage(number);
+        const original = page.getViewport({ scale: 1 });
+        const scale = Math.min(root.clientWidth, 816) / original.width;
+        const ratio = Math.min(window.devicePixelRatio || 1, 2);
+        const viewport = page.getViewport({ scale: scale * ratio });
+        const canvas = document.createElement("canvas");
+        canvas.className = "report-preview-page";
+        canvas.width = Math.ceil(viewport.width);
+        canvas.height = Math.ceil(viewport.height);
+        canvas.style.width = `${viewport.width / ratio}px`;
+        canvas.style.height = `${viewport.height / ratio}px`;
+        canvas.setAttribute("aria-label", `Pagina ${number} de ${pdf.numPages}`);
+        root.append(canvas);
+        await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+        if (generation !== reportPreviewGeneration) return;
+        if (number === 1) {
+          $("#downloadReportButton").disabled = false;
+          $("#shareReportButton").disabled = false;
+        }
+      }
+    } catch (error) {
+      if (generation !== reportPreviewGeneration) return;
+      console.error(error);
+      root.innerHTML = `<p class="muted">No se pudo mostrar el informe. Vuelve a abrirlo.</p>`;
+    } finally {
+      if (generation === reportPreviewGeneration) root.setAttribute("aria-busy", "false");
+    }
   }
 
   function buildSessionPdf(report) {
@@ -1194,8 +1260,22 @@
         y += 10;
       }
       tableHeader();
-      sessions.forEach((session) => {
-        session.attempts.forEach((attempt) => {
+      const attempts = sessions.flatMap((session) => session.attempts);
+      const keys = [...new Set([
+        ...recordColumns(discipline).map((column) => discipline.mode === "tests" ? column.key : column.key.split(":")[1]),
+        ...attempts.map((attempt) => attempt.approachId || attempt.eventId),
+      ])].filter((key) => best.has(key));
+      keys.forEach((groupKey, groupIndex) => {
+        if (groupIndex > 0) {
+          if (y + 18 > 275) { doc.addPage(); y = 20; tableHeader(); }
+          else {
+            doc.setDrawColor(147, 170, 196);
+            doc.setLineWidth(0.35);
+            doc.line(18, y - 1, 192, y - 1);
+            y += 6;
+          }
+        }
+        attempts.filter((attempt) => (attempt.approachId || attempt.eventId) === groupKey).forEach((attempt) => {
           const key = attempt.approachId || attempt.eventId;
           counts[key] = (counts[key] || 0) + 1;
           const label = attempt.approachId ? discipline.approaches.find((approach) => approach.id === attempt.approachId)?.short || attempt.approachLabel : attempt.eventName;
@@ -1218,7 +1298,10 @@
           doc.text(`${fmt(attempt.mark)} ${attempt.unit || "m"}`, 106, y);
           y += height;
         });
-        if (session.notes) { y += 4; textBlock(`Notas: ${session.notes}`, 9); }
+      });
+      [...new Set(sessions.map((session) => session.notes).filter(Boolean))].forEach((notes) => {
+        y += 4;
+        textBlock(`Notas: ${notes}`, 9);
       });
     }
     const pages = doc.getNumberOfPages();
@@ -1234,20 +1317,26 @@
   }
 
   function reportFile() {
-    const filename = `tecnica-${slug(sessionReport.athlete)}-${sessionReport.date}.pdf`;
-    return new File([buildSessionPdf(sessionReport).output("blob")], filename, { type: "application/pdf" });
+    return sessionReportFile;
   }
 
   function downloadSessionReport() {
-    if (!sessionReport) return;
+    if (!sessionReportFile) return;
     try {
-      buildSessionPdf(sessionReport).save(`tecnica-${slug(sessionReport.athlete)}-${sessionReport.date}.pdf`);
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(sessionReportFile);
+      link.href = url;
+      link.download = sessionReportFile.name;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60000);
       toast("Informe PDF descargado");
     } catch (error) { console.error(error); toast("No se pudo generar el PDF"); }
   }
 
   async function shareSessionReport() {
-    if (!sessionReport) return;
+    if (!sessionReportFile) return;
     try {
       const file = reportFile();
       if (navigator.canShare?.({ files: [file] })) {

@@ -543,7 +543,45 @@ label select {
 }
 
 .report-actions {
-  margin-top: 15px;
+  margin: 10px 0;
+  flex-shrink: 0;
+}
+
+.modal-card.report-modal-card {
+  display: flex;
+  flex-direction: column;
+  width: min(96vw, 980px);
+  height: 92dvh;
+  max-height: 92dvh;
+  overflow: hidden;
+}
+
+.report-modal-card .modal-title-row,
+#reportSummary {
+  flex-shrink: 0;
+}
+
+#reportSummary {
+  font-size: 0.85rem;
+}
+
+#reportPreview {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 12px;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 8px;
+  background: var(--soft);
+}
+
+.report-preview-page {
+  display: block;
+  max-width: 100%;
+  height: auto !important;
+  background: white;
 }
 
 #sessionEditBody {
