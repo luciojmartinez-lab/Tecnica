@@ -7,7 +7,7 @@
   const SYNC_META_KEY = "tecnica-sync-meta-v1";
   const MAX_AUTO_BACKUPS = 5;
   const AUTO_BACKUP_WINDOW_MS = 2 * 60 * 1000;
-  const APP_VERSION = "001v24";
+  const APP_VERSION = "001v25";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -464,12 +464,7 @@
     });
 
     $("#athleteSelect").addEventListener("change", () => {
-      const previous = draft.form?.athleteId || state.athletes.find((athlete) => athlete.active !== false)?.id;
-      if (!collectPendingMarks(previous, $("#disciplineSelect").value)) {
-        $("#athleteSelect").value = previous;
-        return;
-      }
-      updateDraftForm();
+      selectDataAthlete($("#athleteSelect").value);
     });
     ["dateInput", "notesInput"].forEach((id) => {
       $("#" + id).addEventListener("input", updateDraftForm);
@@ -615,6 +610,10 @@
           selectDataDiscipline($("#filterDiscipline").value);
           return;
         }
+        if (id === "filterAthlete") {
+          selectDataAthlete($("#filterAthlete").value);
+          return;
+        }
         state.preferences[id] = $("#" + id).value;
         saveState(false);
         renderRecords();
@@ -713,6 +712,23 @@
     $("#syncEndpointInput").value = state.preferences.syncEndpoint || "/api/sync";
     $("#seasonStartMonth").value = state.settings.seasonStartMonth || 9;
     drawChart();
+  }
+
+  function selectDataAthlete(athleteId) {
+    const previous = draft.form?.athleteId || state.athletes.find((athlete) => athlete.active !== false)?.id;
+    const canEnterMarks = state.athletes.some((athlete) => athlete.id === athleteId && athlete.active !== false);
+    if (canEnterMarks && !collectPendingMarks(previous, $("#disciplineSelect").value)) {
+      $("#athleteSelect").value = previous;
+      $("#filterAthlete").value = state.preferences.filterAthlete ?? "";
+      return;
+    }
+    if (canEnterMarks) $("#athleteSelect").value = athleteId;
+    $("#filterAthlete").value = athleteId;
+    state.preferences.filterAthlete = athleteId;
+    saveState(false);
+    updateDraftForm();
+    renderDraftChips();
+    renderRecords();
   }
 
   function selectDataDiscipline(disciplineId) {
