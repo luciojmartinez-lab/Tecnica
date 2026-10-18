@@ -7,7 +7,7 @@
   const SYNC_META_KEY = "tecnica-sync-meta-v1";
   const MAX_AUTO_BACKUPS = 5;
   const AUTO_BACKUP_WINDOW_MS = 2 * 60 * 1000;
-  const APP_VERSION = "001v26";
+  const APP_VERSION = "001v27";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -2124,6 +2124,7 @@
       ctx.fillText(fmt(value), left - 8, y);
     }
 
+    drawSeasonDividers(ctx, dates, xAt, { width, height, left, right, top, bottom });
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     dates.forEach((date, index) => {
@@ -2180,6 +2181,7 @@
     const yAt = (value) => top + (height - top - bottom) * (1 - (value - minimum) / (100 - minimum));
     drawChartFrame(ctx, width, height, left, right, top, bottom, minimum, 100, yAt, "%");
     const xAt = (index) => left + (width - left - right) * (rows.length === 1 ? 0.5 : index / (rows.length - 1));
+    drawSeasonDividers(ctx, rows.map((row) => row.date), xAt, { width, height, left, right, top, bottom });
     drawChartLine(ctx, rows.map((row, index) => ({ x: xAt(index), y: yAt(row.rating) })), COLORS[0]);
     ctx.fillStyle = "#637084";
     ctx.textAlign = "left";
@@ -2192,6 +2194,45 @@
       ctx.restore();
     });
     $("#chartLegend").innerHTML = rows.map((row) => `<span class="legend-item">${shortDate(row.date)}: ${fmt(row.rating)}%</span>`).join("");
+  }
+
+  function drawSeasonDividers(ctx, dates, xAt, { width, height, left, right, top, bottom }) {
+    if ($("#chartSeason").value || !dates.length) return;
+    const bands = [];
+    dates.forEach((date, index) => {
+      const season = seasonKey(date);
+      const previous = bands[bands.length - 1];
+      if (previous?.season === season) previous.end = index;
+      else bands.push({ season, start: index, end: index });
+    });
+    if (bands.length < 2) return;
+    ctx.save();
+    ctx.strokeStyle = "#8795a8";
+    ctx.fillStyle = "#475569";
+    ctx.lineWidth = 1.5;
+    ctx.font = "bold 11px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    let labelRight = left - 6;
+    bands.forEach((band, index) => {
+      const start = index ? (xAt(band.start - 1) + xAt(band.start)) / 2 : left;
+      const end = index < bands.length - 1 ? (xAt(band.end) + xAt(band.end + 1)) / 2 : width - right;
+      if (index) {
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        ctx.moveTo(start, top);
+        ctx.lineTo(start, height - bottom);
+        ctx.stroke();
+      }
+      const label = seasonLabel(band.season);
+      const half = ctx.measureText(label).width / 2;
+      const center = Math.max(left + half, Math.min(width - right - half, (start + end) / 2));
+      if (center - half >= labelRight + 6) {
+        ctx.fillText(label, center, top - 13);
+        labelRight = center + half;
+      }
+    });
+    ctx.restore();
   }
 
   function drawBestMarksChart(ctx, width, height, discipline, athleteId, checked) {
