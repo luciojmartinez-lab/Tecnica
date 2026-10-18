@@ -7,7 +7,7 @@
   const SYNC_META_KEY = "tecnica-sync-meta-v1";
   const MAX_AUTO_BACKUPS = 5;
   const AUTO_BACKUP_WINDOW_MS = 2 * 60 * 1000;
-  const APP_VERSION = "001v27";
+  const APP_VERSION = "001v28";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -1239,7 +1239,18 @@
       date: first.date,
       season: seasonLabel(seasonKey(first.date)),
       sessions: clone(state.sessions.filter((session) => session.athleteId === first.athleteId && session.date === first.date)),
+      ratings: {},
     };
+    [...new Set(sessionReport.sessions.map((session) => session.discipline))].forEach((disciplineId) => {
+      const groups = groupedSessions(disciplineId).filter((group) => group.athleteId === first.athleteId);
+      const current = groups.find((group) => group.date === first.date);
+      if (!current) return;
+      sessionReport.ratings[disciplineId] = {
+        current: groupRating(current),
+        history: groups.filter((group) => seasonKey(group.date) === seasonKey(first.date))
+          .map((group) => ({ date: group.date, ...groupRating(group) })).sort((a, b) => a.date.localeCompare(b.date)),
+      };
+    });
     // Resolve legacy distances now, so PDF generation uses one consistent snapshot.
     sessionReport.sessions.forEach((session) => {
       session.attempts.forEach((attempt) => { attempt.reportDistance = reportDistance(session, attempt.approachId); });
@@ -1369,6 +1380,15 @@
       newPageIfNeeded(40);
       y += 3;
       textBlock(discipline.label, 13, true);
+      const rating = report.ratings[discipline.id];
+      if (rating?.current.percent != null) {
+        textBlock(`Valoracion de la jornada: ${fmt(rating.current.percent)}%`, 11, true, [23, 111, 198]);
+        const columns = recordColumns(discipline);
+        rating.current.components.forEach((component) => {
+          const label = columns.find((column) => column.key === component.key)?.short || component.key;
+          textBlock(`${label}: ${fmt(component.percent)}% | ${fmt(component.mark)} m / referencia 100%: ${fmt(component.reference)} m`, 9);
+        });
+      }
       const counts = {};
       function tableHeader() {
         newPageIfNeeded(12);
@@ -1424,6 +1444,7 @@
         y += 4;
         textBlock(`Notas: ${notes}`, 9);
       });
+      if (rating?.history.length) reportRatingChart(discipline, rating);
     }
     const pages = doc.getNumberOfPages();
     for (let page = 1; page <= pages; page += 1) {
@@ -1435,6 +1456,88 @@
       doc.text(`${page} / ${pages}`, 192, 286, { align: "right" });
     }
     return doc;
+
+    function reportRatingChart(discipline, rating) {
+      const columns = recordColumns(discipline);
+      const series = rating.current.components.map((component, index) => ({
+        key: component.key,
+        label: columns.find((column) => column.key === component.key)?.short || component.key,
+        color: COLORS[index % COLORS.length],
+      }));
+      series.push({ key: null, label: "Jornada", color: "#202c3c" });
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      const legendRows = [[]];
+      let legendWidth = 0;
+      series.forEach((item) => {
+        const width = doc.getTextWidth(item.label) + 14;
+        if (legendWidth + width > 174) { legendRows.push([]); legendWidth = 0; }
+        legendRows[legendRows.length - 1].push({ ...item, x: 18 + legendWidth });
+        legendWidth += width;
+      });
+      const blockHeight = 110 + legendRows.length * 6;
+      newPageIfNeeded(blockHeight);
+      y += 5;
+      textBlock(`Valoraciones de temporada ${report.season} - ${discipline.label}`, 11, true);
+      const left = 34, right = 188, top = y + 5, bottom = top + 60;
+      const values = rating.history.flatMap((row) => [row.percent, ...row.components.filter((item) => series.some((entry) => entry.key === item.key)).map((item) => item.percent)]).filter((value) => value != null);
+      const minimum = Math.max(0, Math.floor((Math.min(...values) - 5) / 10) * 10);
+      const yAt = (value) => bottom - (value - minimum) / (100 - minimum) * (bottom - top);
+      const xAt = (index) => left + (right - left) * (rating.history.length === 1 ? 0.5 : index / (rating.history.length - 1));
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      for (let tick = 0; tick <= 4; tick += 1) {
+        const value = minimum + (100 - minimum) * tick / 4;
+        doc.setDrawColor(215, 222, 232);
+        doc.setLineWidth(0.2);
+        doc.line(left, yAt(value), right, yAt(value));
+        doc.setTextColor(99, 112, 132);
+        doc.text(`${fmt(value)}%`, left - 3, yAt(value) + 1, { align: "right" });
+      }
+      const selected = rating.history.findIndex((row) => row.date === report.date);
+      if (selected >= 0) {
+        doc.setDrawColor(135, 149, 168);
+        doc.setLineDashPattern([1, 1], 0);
+        doc.line(xAt(selected), top, xAt(selected), bottom);
+        doc.setLineDashPattern([], 0);
+      }
+      rating.history.forEach((row, index) => {
+        if (index % Math.ceil(rating.history.length / 12) && index !== rating.history.length - 1) return;
+        doc.setTextColor(99, 112, 132);
+        doc.setFontSize(7);
+        doc.text(shortDate(row.date), xAt(index) + 1, bottom + 19, { angle: 90 });
+      });
+      series.forEach((item) => {
+        const points = rating.history.map((row, index) => {
+          const value = item.key ? row.components.find((component) => component.key === item.key)?.percent : row.percent;
+          return value == null ? null : { x: xAt(index), y: yAt(value), selected: row.date === report.date };
+        }).filter(Boolean);
+        doc.setDrawColor(item.color);
+        doc.setFillColor(item.color);
+        doc.setLineWidth(item.key ? 0.5 : 0.8);
+        if (!item.key) doc.setLineDashPattern([2, 1], 0);
+        points.forEach((point, index) => {
+          if (index) doc.line(points[index - 1].x, points[index - 1].y, point.x, point.y);
+        });
+        doc.setLineDashPattern([], 0);
+        points.forEach((point) => doc.circle(point.x, point.y, point.selected ? 1.25 : 0.65, "F"));
+      });
+      y = bottom + 27;
+      doc.setFontSize(8);
+      legendRows.forEach((row) => {
+        row.forEach((item) => {
+          doc.setDrawColor(item.color);
+          doc.setLineWidth(0.7);
+          if (!item.key) doc.setLineDashPattern([2, 1], 0);
+          doc.line(item.x, y - 1, item.x + 6, y - 1);
+          doc.setLineDashPattern([], 0);
+          doc.setTextColor(20, 32, 51);
+          doc.text(item.label, item.x + 8, y);
+        });
+        y += 6;
+      });
+      y += 5;
+    }
   }
 
   function reportFile() {
@@ -2141,7 +2244,7 @@
       const points = dates
         .map((date, index) => {
           const row = grouped.get(`${metric.key}|${date}`);
-          return row ? { x: xAt(index), y: yAt(row.mark), value: row.mark } : null;
+          return row ? { x: xAt(index), y: yAt(row.mark), value: row.mark, season: seasonKey(date) } : null;
         })
         .filter(Boolean);
       if (!points.length) return;
@@ -2149,7 +2252,7 @@
       ctx.lineWidth = 3;
       ctx.beginPath();
       points.forEach((point, index) => {
-        if (index === 0) ctx.moveTo(point.x, point.y);
+        if (index === 0 || point.season !== points[index - 1].season) ctx.moveTo(point.x, point.y);
         else ctx.lineTo(point.x, point.y);
       });
       ctx.stroke();
@@ -2182,7 +2285,7 @@
     drawChartFrame(ctx, width, height, left, right, top, bottom, minimum, 100, yAt, "%");
     const xAt = (index) => left + (width - left - right) * (rows.length === 1 ? 0.5 : index / (rows.length - 1));
     drawSeasonDividers(ctx, rows.map((row) => row.date), xAt, { width, height, left, right, top, bottom });
-    drawChartLine(ctx, rows.map((row, index) => ({ x: xAt(index), y: yAt(row.rating) })), COLORS[0]);
+    drawChartLine(ctx, rows.map((row, index) => ({ x: xAt(index), y: yAt(row.rating), season: seasonKey(row.date) })), COLORS[0]);
     ctx.fillStyle = "#637084";
     ctx.textAlign = "left";
     rows.forEach((row, index) => {
@@ -2224,7 +2327,7 @@
         ctx.lineTo(start, height - bottom);
         ctx.stroke();
       }
-      const label = seasonLabel(band.season);
+      const label = `Temporada ${seasonLabel(band.season)}`;
       const half = ctx.measureText(label).width / 2;
       const center = Math.max(left + half, Math.min(width - right - half, (start + end) / 2));
       if (center - half >= labelRight + 6) {
@@ -2358,7 +2461,7 @@
     ctx.lineWidth = 3;
     ctx.beginPath();
     points.forEach((point, index) => {
-      if (index === 0) ctx.moveTo(point.x, point.y);
+      if (index === 0 || point.season !== points[index - 1].season) ctx.moveTo(point.x, point.y);
       else ctx.lineTo(point.x, point.y);
     });
     ctx.stroke();
