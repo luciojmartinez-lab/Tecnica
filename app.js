@@ -7,7 +7,7 @@
   const SYNC_META_KEY = "tecnica-sync-meta-v1";
   const MAX_AUTO_BACKUPS = 5;
   const AUTO_BACKUP_WINDOW_MS = 2 * 60 * 1000;
-  const APP_VERSION = "001v29";
+  const APP_VERSION = "001v30";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -160,6 +160,7 @@
     state.sourceNotes = Array.isArray(state.sourceNotes) ? state.sourceNotes : [];
     state.preferences = state.preferences || {};
     state.settings = state.settings || {};
+    if (!["power", "linear"].includes(state.settings.ratingScale)) state.settings.ratingScale = "power";
     state.settings.approachDistances = state.settings.approachDistances || {};
     mergeDuplicateAthletes();
     state.sessions.forEach((session) => {
@@ -653,6 +654,24 @@
       saveState();
       renderAll();
     });
+    $("#ratingScale").addEventListener("change", () => {
+      const previous = state.settings.ratingScale;
+      const updatedAt = state.updatedAt;
+      createAutoBackup("Antes de cambiar valoracion", true);
+      state.settings.ratingScale = $("#ratingScale").value;
+      try { saveState(); }
+      catch (error) {
+        state.settings.ratingScale = previous;
+        state.updatedAt = updatedAt;
+        $("#ratingScale").value = previous;
+        console.error(error);
+        toast("No se pudo guardar el cambio de valoracion");
+        return;
+      }
+      renderRecords();
+      drawChart();
+      toast("Escala de valoracion actualizada");
+    });
     $("#metricPicker").addEventListener("change", drawChart);
     $("#chartBestOnly").addEventListener("change", () => {
       state.preferences.chartBestOnly = $("#chartBestOnly").checked;
@@ -713,6 +732,7 @@
     $("#syncKeyInput").value = state.preferences.syncKey || "";
     $("#syncEndpointInput").value = state.preferences.syncEndpoint || "/api/sync";
     $("#seasonStartMonth").value = state.settings.seasonStartMonth || 9;
+    $("#ratingScale").value = state.settings.ratingScale;
     drawChart();
   }
 
@@ -1195,7 +1215,8 @@
     const components = Object.entries(group.values).flatMap(([key, value]) => {
       const metric = key.includes(":") ? key.split(":")[1] : key;
       const reference = Math.max(value.best || 0, references[metric] || 0);
-      return value.best > 0 && reference > 0 ? [{ key, mark: value.best, reference, percent: value.best / reference * 100 }] : [];
+      const exponent = state.settings.ratingScale === "linear" ? 1 : 2.5;
+      return value.best > 0 && reference > 0 ? [{ key, mark: value.best, reference, percent: Math.pow(value.best / reference, exponent) * 100 }] : [];
     });
     return { components, percent: components.length ? components.reduce((sum, item) => sum + item.percent, 0) / components.length : null };
   }
@@ -1238,6 +1259,7 @@
       athlete: state.athletes.find((athlete) => athlete.id === first.athleteId)?.name || first.athleteId,
       date: first.date,
       season: seasonLabel(seasonKey(first.date)),
+      ratingScale: state.settings.ratingScale,
       sessions: clone(state.sessions.filter((session) => session.athleteId === first.athleteId && session.date === first.date)),
       ratings: {},
     };
@@ -1369,6 +1391,7 @@
     textBlock("TECNICA - INFORME DE JORNADA", 12, true, [23, 111, 198]);
     textBlock(report.athlete, 19, true);
     textBlock(`${formatDate(report.date)}   |   Temporada ${report.season}`, 11);
+    textBlock(report.ratingScale === "linear" ? "Valoracion proporcional" : "Valoracion exigente (potencia 2,5)", 9);
     for (const discipline of Object.values(DISCIPLINES)) {
       const sessions = report.sessions.filter((session) => session.discipline === discipline.id);
       if (!sessions.length) continue;
