@@ -7,7 +7,7 @@
   const SYNC_META_KEY = "tecnica-sync-meta-v1";
   const MAX_AUTO_BACKUPS = 5;
   const AUTO_BACKUP_WINDOW_MS = 2 * 60 * 1000;
-  const APP_VERSION = "001v30";
+  const APP_VERSION = "001v31";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -1215,7 +1215,7 @@
     const components = Object.entries(group.values).flatMap(([key, value]) => {
       const metric = key.includes(":") ? key.split(":")[1] : key;
       const reference = Math.max(value.best || 0, references[metric] || 0);
-      const exponent = state.settings.ratingScale === "linear" ? 1 : 2.5;
+      const exponent = state.settings.ratingScale === "linear" ? 1 : 2;
       return value.best > 0 && reference > 0 ? [{ key, mark: value.best, reference, percent: Math.pow(value.best / reference, exponent) * 100 }] : [];
     });
     return { components, percent: components.length ? components.reduce((sum, item) => sum + item.percent, 0) / components.length : null };
@@ -1391,7 +1391,7 @@
     textBlock("TECNICA - INFORME DE JORNADA", 12, true, [23, 111, 198]);
     textBlock(report.athlete, 19, true);
     textBlock(`${formatDate(report.date)}   |   Temporada ${report.season}`, 11);
-    textBlock(report.ratingScale === "linear" ? "Valoracion proporcional" : "Valoracion exigente (potencia 2,5)", 9);
+    textBlock(report.ratingScale === "linear" ? "Valoracion proporcional" : "Valoracion exigente (potencia 2)", 9);
     for (const discipline of Object.values(DISCIPLINES)) {
       const sessions = report.sessions.filter((session) => session.discipline === discipline.id);
       if (!sessions.length) continue;
