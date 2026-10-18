@@ -7,7 +7,7 @@
   const SYNC_META_KEY = "tecnica-sync-meta-v1";
   const MAX_AUTO_BACKUPS = 5;
   const AUTO_BACKUP_WINDOW_MS = 2 * 60 * 1000;
-  const APP_VERSION = "001v28";
+  const APP_VERSION = "001v29";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -1461,10 +1461,10 @@
       const columns = recordColumns(discipline);
       const series = rating.current.components.map((component, index) => ({
         key: component.key,
-        label: columns.find((column) => column.key === component.key)?.short || component.key,
+        label: `${columns.find((column) => column.key === component.key)?.short || component.key}: ${fmt(component.percent)}%`,
         color: COLORS[index % COLORS.length],
       }));
-      series.push({ key: null, label: "Jornada", color: "#202c3c" });
+      series.push({ key: null, label: `Jornada: ${fmt(rating.current.percent)}%`, color: "#202c3c" });
       doc.setFont("helvetica", "normal");
       doc.setFontSize(8);
       const legendRows = [[]];
@@ -1481,7 +1481,7 @@
       textBlock(`Valoraciones de temporada ${report.season} - ${discipline.label}`, 11, true);
       const left = 34, right = 188, top = y + 5, bottom = top + 60;
       const values = rating.history.flatMap((row) => [row.percent, ...row.components.filter((item) => series.some((entry) => entry.key === item.key)).map((item) => item.percent)]).filter((value) => value != null);
-      const minimum = Math.max(0, Math.floor((Math.min(...values) - 5) / 10) * 10);
+      const minimum = Math.max(0, Math.floor((Math.min(...values) - 1) / 2) * 2);
       const yAt = (value) => bottom - (value - minimum) / (100 - minimum) * (bottom - top);
       const xAt = (index) => left + (right - left) * (rating.history.length === 1 ? 0.5 : index / (rating.history.length - 1));
       doc.setFont("helvetica", "normal");
