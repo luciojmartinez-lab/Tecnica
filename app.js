@@ -7,7 +7,7 @@
   const SYNC_META_KEY = "tecnica-sync-meta-v1";
   const MAX_AUTO_BACKUPS = 5;
   const AUTO_BACKUP_WINDOW_MS = 2 * 60 * 1000;
-  const APP_VERSION = "001v25";
+  const APP_VERSION = "001v26";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -300,6 +300,7 @@
   }
 
   function saveState(touch = true) {
+    ensureRatingReferences();
     if (touch) state.updatedAt = new Date().toISOString();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     if (touch) createAutoBackup("Guardado automatico");
@@ -502,13 +503,14 @@
     });
 
     $("#recordsBody").addEventListener("click", (event) => {
-      const button = event.target.closest("[data-toggle-attempts], [data-delete-session], [data-delete-attempt], [data-edit-session], [data-report-session]");
+      const button = event.target.closest("[data-toggle-attempts], [data-delete-session], [data-delete-attempt], [data-edit-session], [data-report-session], [data-rating-group]");
       if (!button) return;
       if (button.dataset.toggleAttempts) toggleRecordAttempts(button.dataset.toggleAttempts);
       if (button.dataset.deleteSession) deleteSession(button.dataset.deleteSession);
       if (button.dataset.deleteAttempt) deleteAttempt(button.dataset.deleteAttempt);
       if (button.dataset.editSession) openSessionEditor(button.dataset.editSession);
       if (button.dataset.reportSession) openSessionReport(button.dataset.reportSession);
+      if (button.dataset.ratingGroup) openRatingDetails(button.dataset.ratingGroup);
     });
     $("#recordsBody").addEventListener("dblclick", (event) => {
       if (event.target.closest("button, a, input, select")) return;
@@ -1055,6 +1057,7 @@
     const athleteFilter = $("#filterAthlete").value;
     const text = normalize($("#filterText").value);
     const best = bestByDay();
+    const ratingGroups = Object.keys(DISCIPLINES).flatMap(groupedSessions);
     const sorted = rows
       .filter((row) => matchesSeason(row.date, "filterSeason"))
       .filter((row) => !disciplineFilter || row.discipline === disciplineFilter)
@@ -1075,10 +1078,11 @@
           <th>Marca</th>
           <th>Pies</th>
           <th>Metros</th>
+          <th>%</th>
           <th></th>
         </tr>
       `;
-      body.innerHTML = `<tr><td colspan="8" class="muted">Sin datos</td></tr>`;
+      body.innerHTML = `<tr><td colspan="9" class="muted">Sin datos</td></tr>`;
       return;
     }
     table.className = "data-table generic-table";
@@ -1091,6 +1095,7 @@
         <th>Marca</th>
         <th>Pies</th>
         <th>Metros</th>
+        <th>%</th>
         <th></th>
       </tr>
     `;
@@ -1107,6 +1112,7 @@
             <td>${row.mark == null ? '<span class="muted">-</span>' : `${fmt(row.mark)} ${row.unit}${isBest ? '<span class="best-badge">Mejor</span>' : ''}`}</td>
             <td>${row.distanceFeet == null ? "" : fmt(row.distanceFeet)}</td>
             <td>${row.distanceMeters == null ? "" : fmt(row.distanceMeters)}</td>
+            <td>${ratingButton(ratingGroups.find((group) => group.sessionIds.includes(row.sessionId)))}</td>
             <td>${recordActions(row.sessionId, row.sessionId, row.attemptId)}</td>
           </tr>
         `;
@@ -1133,12 +1139,13 @@
       <tr>
         <th>Fecha</th>
         ${columns.map((column) => `<th>${esc(column.short)}</th>`).join("")}
+        <th class="rating-column" title="Valoracion de la jornada">%</th>
         <th></th>
       </tr>
     `;
 
     if (!groups.length) {
-      body.innerHTML = `<tr><td colspan="${columns.length + 2}" class="muted">Sin datos</td></tr>`;
+      body.innerHTML = `<tr><td colspan="${columns.length + 3}" class="muted">Sin datos</td></tr>`;
       return;
     }
 
@@ -1147,6 +1154,7 @@
         <tr data-session-ids="${esc(row.sessionIds.join(","))}">
           <td>${shortDate(row.date)}${!athleteFilter ? `<small class="record-athlete">${esc(row.athleteName)}</small>` : ""}</td>
           ${columns.map((column) => `<td>${formatRecordCell(row, column.key)}</td>`).join("")}
+          <td class="rating-column">${ratingButton(row)}</td>
           <td>${recordActions(row.sessionIds.join(","))}</td>
         </tr>
       `)
@@ -1159,6 +1167,57 @@
       <button class="small-button delete-button" type="button" data-report-session="${esc(reportIds)}">Informe</button>
       <button class="small-button delete-button" type="button" ${attemptId ? `data-delete-attempt="${esc(attemptId)}"` : `data-delete-session="${esc(sessionIds)}"`}>Eliminar</button>
     </div>`;
+  }
+
+  function ensureRatingReferences() {
+    const records = new Map();
+    state.sessions.forEach((session) => session.attempts.forEach((attempt) => {
+      const key = `${session.athleteId}|${session.discipline}|${attempt.approachId || attempt.eventId}`;
+      if (Number.isFinite(attempt.mark) && attempt.mark > 0) records.set(key, Math.max(records.get(key) || 0, attempt.mark));
+    }));
+    // Bootstrap history against today's records, then freeze references for each saved session.
+    state.sessions.forEach((session) => {
+      session.ratingReferences = session.ratingReferences || {};
+      session.attempts.forEach((attempt) => {
+        const metric = attempt.approachId || attempt.eventId;
+        const reference = records.get(`${session.athleteId}|${session.discipline}|${metric}`);
+        if (!(session.ratingReferences[metric] > 0) && reference) session.ratingReferences[metric] = reference;
+      });
+    });
+  }
+
+  function groupRating(group) {
+    const sessions = state.sessions.filter((session) => group.sessionIds.includes(session.id));
+    const references = {};
+    sessions.forEach((session) => Object.entries(session.ratingReferences || {}).forEach(([key, value]) => {
+      references[key] = Math.max(references[key] || 0, value);
+    }));
+    const components = Object.entries(group.values).flatMap(([key, value]) => {
+      const metric = key.includes(":") ? key.split(":")[1] : key;
+      const reference = Math.max(value.best || 0, references[metric] || 0);
+      return value.best > 0 && reference > 0 ? [{ key, mark: value.best, reference, percent: value.best / reference * 100 }] : [];
+    });
+    return { components, percent: components.length ? components.reduce((sum, item) => sum + item.percent, 0) / components.length : null };
+  }
+
+  function ratingButton(group) {
+    if (!group) return "";
+    const rating = groupRating(group);
+    return rating.percent == null ? "" : `<button class="rating-button" type="button" data-rating-group="${esc(group.groupId)}" aria-label="Ver valoracion de la jornada: ${fmt(rating.percent)}%">${fmt(rating.percent)}%</button>`;
+  }
+
+  function openRatingDetails(groupId) {
+    const discipline = DISCIPLINES[groupId.split("|")[0]];
+    if (!discipline) return;
+    const group = groupedSessions(discipline.id).find((item) => item.groupId === groupId);
+    if (!group) return;
+    const rating = groupRating(group);
+    const columns = recordColumns(discipline);
+    $("#attemptModalTitle").textContent = `Valoracion: ${fmt(rating.percent)}%`;
+    $("#attemptModalBody").innerHTML = `<p>${esc(group.athleteName)} - ${shortDate(group.date)}</p>
+      <table class="data-table rating-details"><thead><tr><th>Prueba</th><th>Marca</th><th>100%</th><th>%</th></tr></thead><tbody>
+      ${rating.components.map((item) => `<tr><td>${esc(columns.find((column) => column.key === item.key)?.short || item.key)}</td><td>${fmt(item.mark)} m</td><td>${fmt(item.reference)} m</td><td><strong>${fmt(item.percent)}%</strong></td></tr>`).join("")}</tbody></table>`;
+    $("#attemptModal").hidden = false;
   }
 
   function reportDistance(session, approachId) {
@@ -1943,6 +2002,8 @@
   function renderMetricPicker() {
     const discipline = DISCIPLINES[$("#chartDiscipline").value] || DISCIPLINES.tests;
     const mode = $("#chartMode")?.value || "date";
+    $("#metricPicker").hidden = mode === "rating";
+    $("#chartBestOnly").closest("label").hidden = mode === "rating";
     const bestOnly = $("#chartBestOnly").checked;
     const options = !bestOnly && mode === "approach" && discipline.mode === "approach"
       ? approachDateOptions(discipline)
@@ -1998,6 +2059,11 @@
     const prefKey = !bestOnly && mode === "approach" && discipline.mode === "approach" ? `${discipline.id}:dates` : discipline.id;
     state.preferences.chartMetrics[prefKey] = checked;
     saveState(false);
+
+    if (mode === "rating") {
+      drawRatingChart(ctx, width, height, discipline, athleteId);
+      return;
+    }
 
     if (bestOnly) {
       drawBestMarksChart(ctx, width, height, discipline, athleteId, checked);
@@ -2099,6 +2165,35 @@
       .join("");
   }
 
+  function drawRatingChart(ctx, width, height, discipline, athleteId) {
+    const rows = groupedSessions(discipline.id)
+      .filter((row) => row.athleteId === athleteId && matchesSeason(row.date, "chartSeason"))
+      .map((row) => ({ date: row.date, rating: groupRating(row).percent }))
+      .filter((row) => row.rating != null).sort((a, b) => a.date.localeCompare(b.date));
+    if (!rows.length) {
+      drawEmptyChart(ctx, width, height, "Sin jornadas para esta seleccion");
+      $("#chartLegend").innerHTML = "";
+      return;
+    }
+    const left = 58, right = 24, top = 28, bottom = 86;
+    const minimum = Math.max(0, Math.floor((Math.min(...rows.map((row) => row.rating)) - 5) / 5) * 5);
+    const yAt = (value) => top + (height - top - bottom) * (1 - (value - minimum) / (100 - minimum));
+    drawChartFrame(ctx, width, height, left, right, top, bottom, minimum, 100, yAt, "%");
+    const xAt = (index) => left + (width - left - right) * (rows.length === 1 ? 0.5 : index / (rows.length - 1));
+    drawChartLine(ctx, rows.map((row, index) => ({ x: xAt(index), y: yAt(row.rating) })), COLORS[0]);
+    ctx.fillStyle = "#637084";
+    ctx.textAlign = "left";
+    rows.forEach((row, index) => {
+      if (rows.length > 12 && index % Math.ceil(rows.length / 12) !== 0) return;
+      ctx.save();
+      ctx.translate(xAt(index), height - bottom + 12);
+      ctx.rotate(Math.PI / 2);
+      ctx.fillText(shortDate(row.date), 0, 0);
+      ctx.restore();
+    });
+    $("#chartLegend").innerHTML = rows.map((row) => `<span class="legend-item">${shortDate(row.date)}: ${fmt(row.rating)}%</span>`).join("");
+  }
+
   function drawBestMarksChart(ctx, width, height, discipline, athleteId, checked) {
     const metrics = metricOptions(discipline).filter((metric) => checked.includes(metric.key));
     const best = new Map();
@@ -2197,7 +2292,7 @@
       .join("");
   }
 
-  function drawChartFrame(ctx, width, height, left, right, top, bottom, yMin, yMax, yAt) {
+  function drawChartFrame(ctx, width, height, left, right, top, bottom, yMin, yMax, yAt, suffix = "") {
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, width, height);
     ctx.strokeStyle = "#d7dee8";
@@ -2213,7 +2308,7 @@
       ctx.moveTo(left, y);
       ctx.lineTo(width - right, y);
       ctx.stroke();
-      ctx.fillText(fmt(value), left - 8, y);
+      ctx.fillText(fmt(value) + suffix, left - 8, y);
     }
   }
 

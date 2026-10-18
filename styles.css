@@ -439,6 +439,25 @@ label select {
   table-layout: fixed;
 }
 
+.rating-column { width: 80px; }
+@media (max-width: 620px) {
+  .rating-column { width: 64px; }
+}
+#metricPicker[hidden], .chart-best-control[hidden] { display: none; }
+.rating-button {
+  border: 0;
+  background: none;
+  color: var(--blue, #176fc6);
+  padding: 0;
+  min-height: 32px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.rating-details { min-width: 0; font-size: 0.8rem; }
+.rating-details th, .rating-details td { padding: 8px 4px; }
+
 .data-table th {
   position: sticky;
   top: 0;
