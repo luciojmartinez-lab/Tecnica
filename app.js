@@ -7,7 +7,7 @@
   const SYNC_META_KEY = "tecnica-sync-meta-v1";
   const MAX_AUTO_BACKUPS = 5;
   const AUTO_BACKUP_WINDOW_MS = 2 * 60 * 1000;
-  const APP_VERSION = "001v33";
+  const APP_VERSION = "001v34";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -638,6 +638,10 @@
     });
     $("#chartMode").addEventListener("change", () => {
       state.preferences.chartMode = $("#chartMode").value;
+      if (["date", "approach"].includes($("#chartMode").value)) {
+        $("#chartBestOnly").checked = false;
+        state.preferences.chartBestOnly = false;
+      }
       saveState(false);
       renderMetricPicker();
       drawChart();
@@ -2159,6 +2163,16 @@
 
   function renderMetricPicker() {
     const discipline = DISCIPLINES[$("#chartDiscipline").value] || DISCIPLINES.tests;
+    const approachOption = $("#chartMode option[value='approach']");
+    approachOption.hidden = discipline.mode !== "approach";
+    approachOption.disabled = discipline.mode !== "approach";
+    approachOption.textContent = discipline.id === "altura" ? "Pasos" : "Zancadas";
+    if (discipline.mode !== "approach" && $("#chartMode").value === "approach") {
+      $("#chartMode").value = "date";
+      state.preferences.chartMode = "date";
+      $("#chartBestOnly").checked = false;
+      state.preferences.chartBestOnly = false;
+    }
     const mode = $("#chartMode")?.value || "date";
     $("#metricPicker").hidden = ["rating", "seasonRating"].includes(mode);
     $("#chartBestOnly").closest("label").hidden = ["rating", "seasonRating"].includes(mode);
