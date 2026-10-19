@@ -456,6 +456,7 @@ label select {
   font-variant-numeric: tabular-nums;
 }
 .rating-details { min-width: 0; font-size: 0.8rem; }
+.seasonal-rating { display: block; margin: 0 auto; color: #27684a; font-size: 0.9em; }
 .rating-details th, .rating-details td { padding: 8px 4px; }
 
 .data-table th {

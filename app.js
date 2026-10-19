@@ -7,7 +7,7 @@
   const SYNC_META_KEY = "tecnica-sync-meta-v1";
   const MAX_AUTO_BACKUPS = 5;
   const AUTO_BACKUP_WINDOW_MS = 2 * 60 * 1000;
-  const APP_VERSION = "001v31";
+  const APP_VERSION = "001v32";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -504,7 +504,7 @@
     });
 
     $("#recordsBody").addEventListener("click", (event) => {
-      const button = event.target.closest("[data-toggle-attempts], [data-delete-session], [data-delete-attempt], [data-edit-session], [data-report-session], [data-rating-group]");
+      const button = event.target.closest("[data-toggle-attempts], [data-delete-session], [data-delete-attempt], [data-edit-session], [data-report-session], [data-rating-group], [data-season-rating-group]");
       if (!button) return;
       if (button.dataset.toggleAttempts) toggleRecordAttempts(button.dataset.toggleAttempts);
       if (button.dataset.deleteSession) deleteSession(button.dataset.deleteSession);
@@ -512,6 +512,7 @@
       if (button.dataset.editSession) openSessionEditor(button.dataset.editSession);
       if (button.dataset.reportSession) openSessionReport(button.dataset.reportSession);
       if (button.dataset.ratingGroup) openRatingDetails(button.dataset.ratingGroup);
+      if (button.dataset.seasonRatingGroup) openRatingDetails(button.dataset.seasonRatingGroup);
     });
     $("#recordsBody").addEventListener("dblclick", (event) => {
       if (event.target.closest("button, a, input, select")) return;
@@ -1098,7 +1099,7 @@
           <th>Marca</th>
           <th>Pies</th>
           <th>Metros</th>
-          <th>%</th>
+          <th>% Global<br><small>% Temp.</small></th>
           <th></th>
         </tr>
       `;
@@ -1115,7 +1116,7 @@
         <th>Marca</th>
         <th>Pies</th>
         <th>Metros</th>
-        <th>%</th>
+        <th>% Global<br><small>% Temp.</small></th>
         <th></th>
       </tr>
     `;
@@ -1159,7 +1160,7 @@
       <tr>
         <th>Fecha</th>
         ${columns.map((column) => `<th>${esc(column.short)}</th>`).join("")}
-        <th class="rating-column" title="Valoracion de la jornada">%</th>
+        <th class="rating-column" title="Valoracion global y de temporada">% Global<br><small>% Temp.</small></th>
         <th></th>
       </tr>
     `;
@@ -1191,25 +1192,38 @@
 
   function ensureRatingReferences() {
     const records = new Map();
+    const seasonRecords = new Map();
     state.sessions.forEach((session) => session.attempts.forEach((attempt) => {
       const key = `${session.athleteId}|${session.discipline}|${attempt.approachId || attempt.eventId}`;
-      if (Number.isFinite(attempt.mark) && attempt.mark > 0) records.set(key, Math.max(records.get(key) || 0, attempt.mark));
+      if (Number.isFinite(attempt.mark) && attempt.mark > 0) {
+        records.set(key, Math.max(records.get(key) || 0, attempt.mark));
+        const seasonMetric = `${seasonKey(session.date)}|${key}`;
+        seasonRecords.set(seasonMetric, Math.max(seasonRecords.get(seasonMetric) || 0, attempt.mark));
+      }
     }));
     // Bootstrap history against today's records, then freeze references for each saved session.
     state.sessions.forEach((session) => {
       session.ratingReferences = session.ratingReferences || {};
+      const season = seasonKey(session.date);
+      const startMonth = Number(state.settings.seasonStartMonth || 9);
+      if (session.seasonRatingReferences?.season !== season || session.seasonRatingReferences.startMonth !== startMonth) {
+        session.seasonRatingReferences = { season, startMonth, values: {} };
+      }
+      session.seasonRatingReferences.values = session.seasonRatingReferences.values || {};
       session.attempts.forEach((attempt) => {
         const metric = attempt.approachId || attempt.eventId;
         const reference = records.get(`${session.athleteId}|${session.discipline}|${metric}`);
         if (!(session.ratingReferences[metric] > 0) && reference) session.ratingReferences[metric] = reference;
+        const seasonReference = seasonRecords.get(`${season}|${session.athleteId}|${session.discipline}|${metric}`);
+        if (!(session.seasonRatingReferences.values[metric] > 0) && seasonReference) session.seasonRatingReferences.values[metric] = seasonReference;
       });
     });
   }
 
-  function groupRating(group) {
+  function groupRating(group, scope = "global") {
     const sessions = state.sessions.filter((session) => group.sessionIds.includes(session.id));
     const references = {};
-    sessions.forEach((session) => Object.entries(session.ratingReferences || {}).forEach(([key, value]) => {
+    sessions.forEach((session) => Object.entries((scope === "season" ? session.seasonRatingReferences?.values : session.ratingReferences) || {}).forEach(([key, value]) => {
       references[key] = Math.max(references[key] || 0, value);
     }));
     const components = Object.entries(group.values).flatMap(([key, value]) => {
@@ -1224,7 +1238,9 @@
   function ratingButton(group) {
     if (!group) return "";
     const rating = groupRating(group);
-    return rating.percent == null ? "" : `<button class="rating-button" type="button" data-rating-group="${esc(group.groupId)}" aria-label="Ver valoracion de la jornada: ${fmt(rating.percent)}%">${fmt(rating.percent)}%</button>`;
+    const seasonal = groupRating(group, "season");
+    return rating.percent == null ? "" : `<button class="rating-button" type="button" data-rating-group="${esc(group.groupId)}" aria-label="Valoracion global: ${fmt(rating.percent)}%">${fmt(rating.percent)}%</button>
+      <button class="rating-button seasonal-rating" type="button" data-season-rating-group="${esc(group.groupId)}" aria-label="Valoracion temporada ${seasonLabel(seasonKey(group.date))}: ${fmt(seasonal.percent)}%">${fmt(seasonal.percent)}%</button>`;
   }
 
   function openRatingDetails(groupId) {
@@ -1234,10 +1250,14 @@
     if (!group) return;
     const rating = groupRating(group);
     const columns = recordColumns(discipline);
-    $("#attemptModalTitle").textContent = `Valoracion: ${fmt(rating.percent)}%`;
-    $("#attemptModalBody").innerHTML = `<p>${esc(group.athleteName)} - ${shortDate(group.date)}</p>
+    const seasonal = groupRating(group, "season");
+    $("#attemptModalTitle").textContent = "Valoracion de la jornada";
+    const detailTable = (value) => `
       <table class="data-table rating-details"><thead><tr><th>Prueba</th><th>Marca</th><th>100%</th><th>%</th></tr></thead><tbody>
-      ${rating.components.map((item) => `<tr><td>${esc(columns.find((column) => column.key === item.key)?.short || item.key)}</td><td>${fmt(item.mark)} m</td><td>${fmt(item.reference)} m</td><td><strong>${fmt(item.percent)}%</strong></td></tr>`).join("")}</tbody></table>`;
+      ${value.components.map((item) => `<tr><td>${esc(columns.find((column) => column.key === item.key)?.short || item.key)}</td><td>${fmt(item.mark)} m</td><td>${fmt(item.reference)} m</td><td><strong>${fmt(item.percent)}%</strong></td></tr>`).join("")}</tbody></table>`;
+    $("#attemptModalBody").innerHTML = `<p>${esc(group.athleteName)} - ${shortDate(group.date)}</p>
+      <h3>Global: ${fmt(rating.percent)}%</h3>${detailTable(rating)}
+      <h3>Temporada ${seasonLabel(seasonKey(group.date))}: ${fmt(seasonal.percent)}%</h3>${detailTable(seasonal)}`;
     $("#attemptModal").hidden = false;
   }
 
@@ -1269,8 +1289,9 @@
       if (!current) return;
       sessionReport.ratings[disciplineId] = {
         current: groupRating(current),
+        seasonal: groupRating(current, "season"),
         history: groups.filter((group) => seasonKey(group.date) === seasonKey(first.date))
-          .map((group) => ({ date: group.date, ...groupRating(group) })).sort((a, b) => a.date.localeCompare(b.date)),
+          .map((group) => ({ date: group.date, ...groupRating(group), seasonPercent: groupRating(group, "season").percent })).sort((a, b) => a.date.localeCompare(b.date)),
       };
     });
     // Resolve legacy distances now, so PDF generation uses one consistent snapshot.
@@ -1405,11 +1426,12 @@
       textBlock(discipline.label, 13, true);
       const rating = report.ratings[discipline.id];
       if (rating?.current.percent != null) {
-        textBlock(`Valoracion de la jornada: ${fmt(rating.current.percent)}%`, 11, true, [23, 111, 198]);
+        textBlock(`Valoracion global: ${fmt(rating.current.percent)}% | Temporada ${report.season}: ${fmt(rating.seasonal.percent)}%`, 11, true, [23, 111, 198]);
         const columns = recordColumns(discipline);
         rating.current.components.forEach((component) => {
           const label = columns.find((column) => column.key === component.key)?.short || component.key;
-          textBlock(`${label}: ${fmt(component.percent)}% | ${fmt(component.mark)} m / referencia 100%: ${fmt(component.reference)} m`, 9);
+          const seasonal = rating.seasonal.components.find((item) => item.key === component.key);
+          textBlock(`${label}: ${fmt(component.mark)} m | Global: ${fmt(component.percent)}% (ref. ${fmt(component.reference)} m) | Temporada: ${fmt(seasonal.percent)}% (ref. ${fmt(seasonal.reference)} m)`, 9);
         });
       }
       const counts = {};
@@ -1487,7 +1509,8 @@
         label: `${columns.find((column) => column.key === component.key)?.short || component.key}: ${fmt(component.percent)}%`,
         color: COLORS[index % COLORS.length],
       }));
-      series.push({ key: null, label: `Jornada: ${fmt(rating.current.percent)}%`, color: "#202c3c" });
+      series.push({ key: null, label: `Global: ${fmt(rating.current.percent)}%`, color: "#202c3c" });
+      series.push({ key: null, seasonal: true, label: `Temporada: ${fmt(rating.seasonal.percent)}%`, color: "#27684a" });
       doc.setFont("helvetica", "normal");
       doc.setFontSize(8);
       const legendRows = [[]];
@@ -1503,7 +1526,7 @@
       y += 5;
       textBlock(`Valoraciones de temporada ${report.season} - ${discipline.label}`, 11, true);
       const left = 34, right = 188, top = y + 5, bottom = top + 60;
-      const values = rating.history.flatMap((row) => [row.percent, ...row.components.filter((item) => series.some((entry) => entry.key === item.key)).map((item) => item.percent)]).filter((value) => value != null);
+      const values = rating.history.flatMap((row) => [row.percent, row.seasonPercent, ...row.components.filter((item) => series.some((entry) => entry.key === item.key)).map((item) => item.percent)]).filter((value) => value != null);
       const minimum = Math.max(0, Math.floor((Math.min(...values) - 1) / 2) * 2);
       const yAt = (value) => bottom - (value - minimum) / (100 - minimum) * (bottom - top);
       const xAt = (index) => left + (right - left) * (rating.history.length === 1 ? 0.5 : index / (rating.history.length - 1));
@@ -1532,7 +1555,7 @@
       });
       series.forEach((item) => {
         const points = rating.history.map((row, index) => {
-          const value = item.key ? row.components.find((component) => component.key === item.key)?.percent : row.percent;
+          const value = item.seasonal ? row.seasonPercent : item.key ? row.components.find((component) => component.key === item.key)?.percent : row.percent;
           return value == null ? null : { x: xAt(index), y: yAt(value), selected: row.date === report.date };
         }).filter(Boolean);
         doc.setDrawColor(item.color);
@@ -2128,8 +2151,8 @@
   function renderMetricPicker() {
     const discipline = DISCIPLINES[$("#chartDiscipline").value] || DISCIPLINES.tests;
     const mode = $("#chartMode")?.value || "date";
-    $("#metricPicker").hidden = mode === "rating";
-    $("#chartBestOnly").closest("label").hidden = mode === "rating";
+    $("#metricPicker").hidden = ["rating", "seasonRating"].includes(mode);
+    $("#chartBestOnly").closest("label").hidden = ["rating", "seasonRating"].includes(mode);
     const bestOnly = $("#chartBestOnly").checked;
     const options = !bestOnly && mode === "approach" && discipline.mode === "approach"
       ? approachDateOptions(discipline)
@@ -2186,8 +2209,8 @@
     state.preferences.chartMetrics[prefKey] = checked;
     saveState(false);
 
-    if (mode === "rating") {
-      drawRatingChart(ctx, width, height, discipline, athleteId);
+    if (["rating", "seasonRating"].includes(mode)) {
+      drawRatingChart(ctx, width, height, discipline, athleteId, mode === "seasonRating" ? "season" : "global");
       return;
     }
 
@@ -2292,10 +2315,10 @@
       .join("");
   }
 
-  function drawRatingChart(ctx, width, height, discipline, athleteId) {
+  function drawRatingChart(ctx, width, height, discipline, athleteId, scope = "global") {
     const rows = groupedSessions(discipline.id)
       .filter((row) => row.athleteId === athleteId && matchesSeason(row.date, "chartSeason"))
-      .map((row) => ({ date: row.date, rating: groupRating(row).percent }))
+      .map((row) => ({ date: row.date, rating: groupRating(row, scope).percent }))
       .filter((row) => row.rating != null).sort((a, b) => a.date.localeCompare(b.date));
     if (!rows.length) {
       drawEmptyChart(ctx, width, height, "Sin jornadas para esta seleccion");
