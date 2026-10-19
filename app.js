@@ -7,7 +7,7 @@
   const SYNC_META_KEY = "tecnica-sync-meta-v1";
   const MAX_AUTO_BACKUPS = 5;
   const AUTO_BACKUP_WINDOW_MS = 2 * 60 * 1000;
-  const APP_VERSION = "001v32";
+  const APP_VERSION = "001v33";
   const COLORS = ["#176fc6", "#1fbf72", "#c47b19", "#8b5cf6", "#c2413f", "#0891b2", "#475569"];
 
   const DISCIPLINES = {
@@ -1553,11 +1553,13 @@
         doc.setFontSize(7);
         doc.text(shortDate(row.date), xAt(index) + 1, bottom + 19, { angle: 90 });
       });
+      const percentagePoints = [];
       series.forEach((item) => {
         const points = rating.history.map((row, index) => {
           const value = item.seasonal ? row.seasonPercent : item.key ? row.components.find((component) => component.key === item.key)?.percent : row.percent;
-          return value == null ? null : { x: xAt(index), y: yAt(value), selected: row.date === report.date };
+          return value == null ? null : { x: xAt(index), y: yAt(value), value, color: item.color, selected: row.date === report.date };
         }).filter(Boolean);
+        percentagePoints.push(...points);
         doc.setDrawColor(item.color);
         doc.setFillColor(item.color);
         doc.setLineWidth(item.key ? 0.5 : 0.8);
@@ -1567,6 +1569,13 @@
         });
         doc.setLineDashPattern([], 0);
         points.forEach((point) => doc.circle(point.x, point.y, point.selected ? 1.25 : 0.65, "F"));
+      });
+      doc.setFontSize(6.5);
+      percentageLabels(percentagePoints, (text) => doc.getTextWidth(text), { left, right, top: top - 5, height: 2.5, gap: 1.5 }).forEach((label) => {
+        doc.setFillColor(255, 255, 255);
+        doc.rect(label.x - label.width / 2 - 0.4, label.y - 2.4, label.width + 0.8, 3, "F");
+        doc.setTextColor(label.color);
+        doc.text(label.text, label.x, label.y, { align: "center" });
       });
       y = bottom + 27;
       doc.setFontSize(8);
@@ -2325,13 +2334,26 @@
       $("#chartLegend").innerHTML = "";
       return;
     }
-    const left = 58, right = 24, top = 28, bottom = 86;
+    const left = 58, right = 24, top = 54, bottom = 86;
     const minimum = Math.max(0, Math.floor((Math.min(...rows.map((row) => row.rating)) - 5) / 5) * 5);
     const yAt = (value) => top + (height - top - bottom) * (1 - (value - minimum) / (100 - minimum));
     drawChartFrame(ctx, width, height, left, right, top, bottom, minimum, 100, yAt, "%");
     const xAt = (index) => left + (width - left - right) * (rows.length === 1 ? 0.5 : index / (rows.length - 1));
     drawSeasonDividers(ctx, rows.map((row) => row.date), xAt, { width, height, left, right, top, bottom });
     drawChartLine(ctx, rows.map((row, index) => ({ x: xAt(index), y: yAt(row.rating), season: seasonKey(row.date) })), COLORS[0]);
+    ctx.save();
+    ctx.font = "10px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "#ffffff";
+    ctx.fillStyle = COLORS[0];
+    const points = rows.map((row, index) => ({ x: xAt(index), y: yAt(row.rating), value: row.rating }));
+    percentageLabels(points, (text) => ctx.measureText(text).width, { left, right: width - right, top: 27, height: 11, gap: 7 }).forEach((label) => {
+      ctx.strokeText(label.text, label.x, label.y);
+      ctx.fillText(label.text, label.x, label.y);
+    });
+    ctx.restore();
     ctx.fillStyle = "#637084";
     ctx.textAlign = "left";
     rows.forEach((row, index) => {
@@ -2377,7 +2399,7 @@
       const half = ctx.measureText(label).width / 2;
       const center = Math.max(left + half, Math.min(width - right - half, (start + end) / 2));
       if (center - half >= labelRight + 6) {
-        ctx.fillText(label, center, top - 13);
+        ctx.fillText(label, center, Math.min(top - 13, 15));
         labelRight = center + half;
       }
     });
@@ -2500,6 +2522,28 @@
       ctx.stroke();
       ctx.fillText(fmt(value) + suffix, left - 8, y);
     }
+  }
+
+  function percentageLabels(points, measure, { left, right, top, height, gap }) {
+    const labels = [];
+    const seen = new Set();
+    points.forEach((point) => {
+      const text = `${fmt(point.value)}%`;
+      const key = `${point.x}|${text}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      const width = measure(text);
+      const x = Math.max(left + width / 2, Math.min(right - width / 2, point.x));
+      for (let lane = 0; lane < 8; lane += 1) {
+        const y = point.y - gap - lane * (height + gap / 2);
+        if (y - height < top) break;
+        const overlaps = labels.some((other) => Math.abs(other.x - x) < (other.width + width) / 2 + gap / 2 && Math.abs(other.y - y) < height + gap / 2);
+        if (overlaps) continue;
+        labels.push({ ...point, x, y, text, width });
+        break;
+      }
+    });
+    return labels;
   }
 
   function drawChartLine(ctx, points, color) {
